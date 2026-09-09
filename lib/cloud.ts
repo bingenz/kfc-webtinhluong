@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Ledger } from './payroll';
+import {parseLedger} from './ledger-schema';
 let client: SupabaseClient | null = null;
 export async function cloudClient() {
   if(client) return client;
@@ -14,7 +15,7 @@ export type Profile={id:string;username:string;display_name:string};
 export async function loadLedger(c:SupabaseClient,id:string) {
   const {data,error}=await c.from('ledgers').select('payload,revision').eq('owner_id',id).maybeSingle();
   if(error) throw error;
-  return data as {payload:Ledger;revision:number}|null;
+  return data?{payload:parseLedger(data.payload),revision:Number(data.revision)}:null;
 }
 export async function saveLedger(c:SupabaseClient,payload:Ledger,revision:number) {
   const {data,error}=await c.rpc('save_ledger',{document:payload,expected_revision:revision});

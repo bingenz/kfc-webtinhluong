@@ -1,6 +1,6 @@
 # Ca Làm — KFC Web tính lương
 
-Ứng dụng tiếng Việt ưu tiên điện thoại: ghi ca theo vị trí, tính lương theo ngày áp dụng, đối chiếu lương nhận hàng tháng, tài khoản và quyền chia sẻ chỉ đọc.
+Ứng dụng tiếng Việt ưu tiên điện thoại, hỗ trợ giao diện sáng/tối ghi nhớ theo thiết bị: ghi ca theo vị trí, tính lương theo ngày áp dụng, đối chiếu lương nhận hàng tháng, tài khoản và quyền chia sẻ chỉ đọc.
 
 ## Công nghệ
 
@@ -47,11 +47,26 @@ Dùng **Cloudflare Workers**, vì bản này có API `/api/config` và build Wor
 
 1. Tạo Worker kết nối repository này trong Workers & Pages.
 2. Lệnh build: `npm run build`.
-3. Lệnh deploy: `npx wrangler deploy --config dist/server/wrangler.json`.
+3. Lệnh deploy: `npx wrangler deploy --config dist/server/wrangler.json --keep-vars`.
 4. Thêm hai biến Supabase ở phần Settings → Variables and Secrets của Worker. Dùng giá trị publishable, không dùng service-role.
 5. Thêm tên miền Worker vào danh sách redirect của Supabase Auth rồi kiểm tra đăng ký, xác nhận email và đăng nhập.
 
 Tên Worker mặc định là `ca-lam`, có thể đổi `name` ở `localBindingConfig` trong `vite.config.ts` trước khi triển khai vào tài khoản riêng. Build và mã nguồn đều tương thích với hạ tầng Sites; `.openai/hosting.json` trong bản GitHub không gắn với danh tính Site riêng của phiên xây dựng.
+
+## Triển khai tự động đã chuẩn bị
+
+Workflow `.github/workflows/cloudflare.yml` kiểm tra và triển khai vào Worker `kfc-webtinhluong` khi main thay đổi. Khi chưa có quyền Cloudflare, workflow báo rõ chưa triển khai và không tạo tài nguyên.
+
+Thiết lập một lần tại repository → Settings → Secrets and variables → Actions → Secrets:
+
+- `CLOUDFLARE_API_TOKEN`: token theo mẫu **Edit Cloudflare Workers**, giới hạn đúng tài khoản triển khai.
+- `CLOUDFLARE_ACCOUNT_ID`: Account ID của tài khoản đó.
+
+Sau đó mở Actions → **Triển khai Cloudflare** → **Run workflow** trên main. Lần cập nhật tiếp theo sẽ tự triển khai nếu kiểm tra đạt. Không bật thêm gói trả phí. URL Worker xuất hiện trong log triển khai. Cuối cùng thêm URL này vào Supabase Auth → URL Configuration để email xác nhận/khôi phục quay lại đúng web.
+
+`deployment/supabase-public.json` đã chứa URL và **publishable key công khai** của dự án dành cho ứng dụng; quyền dữ liệu vẫn do Supabase Auth và RLS kiểm soát. Không đặt secret/service-role key vào file này. Có thể thay dự án bằng Actions variables `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`; tên Worker có thể đổi bằng `CLOUDFLARE_WORKER_NAME`. Token Cloudflare chỉ được lưu trong Actions secrets, không đưa vào mã nguồn hoặc tin nhắn.
+
+Tham khảo: [Cloudflare GitHub Actions](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/).
 
 ## Quy tắc nghiệp vụ
 
