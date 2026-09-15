@@ -1,96 +1,766 @@
-'use client';
-import {DatePicker,TimePicker} from '@/components/payroll-pickers';
-import {useEffect,useMemo,useRef,useState} from 'react';
-import type {SupabaseClient,User} from '@supabase/supabase-js';
-import {CalendarCheck2,LayoutDashboard,CalendarDays,Wallet,Settings2,Users,Plus,ChevronLeft,ChevronRight,ArrowUpRight,Clock3,BriefcaseBusiness,Moon,ShieldCheck,Cloud,HardDrive,LogIn,Pencil,Trash2,LockKeyhole,RefreshCw,ArrowRight,Download} from 'lucide-react';
-import {Tabs,TabsList,TabsTrigger,TabsContent} from '@/components/ui/tabs';
-import {AlertDialog,AlertDialogContent,AlertDialogTitle,AlertDialogDescription,AlertDialogFooter,AlertDialogCancel} from '@/components/ui/alert-dialog';
-import {toast} from 'sonner';
-import {ThemeToggle, AppToaster} from '@/components/theme-controls';
-import {errorMessage} from '@/lib/errors';
-import {parseLedger} from '@/lib/ledger-schema';
-import {Field,Choose,Modal,Blank} from '@/components/payroll-ui';
-import PayrollSettings from '@/components/payroll-settings';
-import AccountPanel from '@/components/payroll-account';
-import {type Ledger,type Shift,initialLedger,uid,today,money,hours,shortDate,makeShift,shiftAmount,shiftBonus,shiftBase,period,lockedDate,validDate} from '@/lib/payroll';
-import {cloudClient,loadLedger,saveLedger,type Profile} from '@/lib/cloud';
-const LOCAL_KEY='ca-lam-local-v1';
-const tabs=[{id:'overview',label:'Tổng quan',icon:LayoutDashboard},{id:'calendar',label:'Lịch làm',icon:CalendarDays},{id:'payroll',label:'Đối chiếu',icon:Wallet},{id:'settings',label:'Cài đặt',icon:Settings2},{id:'account',label:'Tài khoản',icon:Users}];
-function parseLocal():Ledger{const raw=localStorage.getItem(LOCAL_KEY);return raw?parseLedger(JSON.parse(raw)):initialLedger();}
-export default function PayrollApp(){
- const [data,setData]=useState<Ledger>(initialLedger),[ready,setReady]=useState(false),[busy,setBusy]=useState(false),[tab,setTab]=useState('overview'),[month,setMonth]=useState(today().slice(0,7)),[selected,setSelected]=useState(today()),[filter,setFilter]=useState('all');
- const [client,setClient]=useState<SupabaseClient|null>(null),[user,setUser]=useState<User|null>(null),[profile,setProfile]=useState<Profile|null>(null),[revision,setRevision]=useState(0),[syncError,setSyncError]=useState(''),[cloudReady,setCloudReady]=useState(false),[shared,setShared]=useState<Profile|null>(null),[ownData,setOwnData]=useState<Ledger|null>(null),[hasLocal,setHasLocal]=useState(false);
- const [modal,setModal]=useState(''),[formError,setFormError]=useState(''),[editing,setEditing]=useState<Shift|undefined>(),[date,setDate]=useState(today()),[roleId,setRoleId]=useState('cook'),[start,setStart]=useState('08:00'),[end,setEnd]=useState('13:00'),[note,setNote]=useState(''),[amount,setAmount]=useState(''),[newPassword,setNewPassword]=useState('');
- const [confirm,setConfirm]=useState<{title:string;text:string;action:()=>Promise<void>}|null>(null);
- const userRef=useRef<User|null>(null);
- const writeLock=useRef(false),revisionRef=useRef(0),localRaw=useRef<string|null>(null);
- const readOnly=!!shared;
- const stats=useMemo(()=>period(data,month),[data,month]);
- useEffect(()=>{
-  let canceled=false;let unsubscribe:undefined|(()=>void);
-  queueMicrotask(()=>{if(canceled)return;let valid=true;try{const raw=localStorage.getItem(LOCAL_KEY);localRaw.current=raw;const d=parseLocal();setData(d);setHasLocal(!!raw&&JSON.stringify(d)!==JSON.stringify(initialLedger()));}catch(e){valid=false;setSyncError(errorMessage(e));}
-  setReady(valid);});
-  cloudClient().then(async c=>{if(canceled)return;setClient(c);if(!c){setCloudReady(true);return}const {data:{session}}=await c.auth.getSession();if(canceled)return;userRef.current=session?.user||null;setUser(session?.user||null);setCloudReady(!session?.user);const subscription=c.auth.onAuthStateChange((event,s)=>{if(canceled)return;userRef.current=s?.user||null;setUser(previous=>previous?.id===s?.user?.id?previous:s?.user||null);if(event==='PASSWORD_RECOVERY'){setModal('recovery');setTab('account')}});unsubscribe=()=>subscription.data.subscription.unsubscribe();}).catch(e=>{if(!canceled)setSyncError(errorMessage(e))});
-  const onStorage=(e:StorageEvent)=>{if(e.key===LOCAL_KEY&&!writeLock.current){localRaw.current=e.newValue;try{if(!userRef.current)setData(parseLocal())}catch(err){setSyncError(errorMessage(err))}}};
-  window.addEventListener('storage',onStorage);
-  return ()=>{canceled=true;unsubscribe?.();window.removeEventListener('storage',onStorage)};
- },[]);
- useEffect(()=>{
-  if(!client)return;let active=true;
-  (async()=>{await Promise.resolve();if(!active)return;setShared(null);setOwnData(null);
-  if(!user){setProfile(null);setRevision(0);revisionRef.current=0;try{setData(parseLocal());localRaw.current=localStorage.getItem(LOCAL_KEY)}catch(e){setSyncError(errorMessage(e))}setCloudReady(true);return;}
-  setCloudReady(false);
-  let p=await client.from('profiles').select('*').eq('id',user.id).maybeSingle();if(p.error)throw p.error;if(!p.data){const initial={id:user.id,username:'user_'+user.id.replaceAll('-','').slice(0,16),display_name:String(user.user_metadata?.display_name||'Người dùng').slice(0,80)};const r=await client.from('profiles').upsert(initial).select().single();if(r.error)throw r.error;p=r;}
-   const ledger=await loadLedger(client,user.id);if(!active)return;setProfile(p.data);setData(ledger?.payload||initialLedger());setRevision(ledger?.revision||0);revisionRef.current=ledger?.revision||0;setCloudReady(true);setReady(true);setSyncError('');
-  })().catch(e=>{if(active){setSyncError('Chưa tải được sổ lương: '+errorMessage(e));setCloudReady(false)}});
-  return ()=>{active=false};
- },[client,user]);
- useEffect(()=>{if(!client||!shared)return;let active=true;const check=async()=>{try{const result=await loadLedger(client,shared.id);if(!active)return;if(!result)throw new Error('Quyền xem đã bị thu hồi hoặc sổ chưa có dữ liệu.');setData(result.payload)}catch(e){if(active){setShared(null);if(ownData)setData(ownData);setOwnData(null);toast.error(errorMessage(e))}}};const timer=setInterval(check,30000);window.addEventListener('focus',check);return()=>{active=false;clearInterval(timer);window.removeEventListener('focus',check)}},[client,shared,ownData]);
- async function commit(next:Ledger){
-  if(readOnly)throw new Error('Bạn chỉ có quyền xem sổ này.');
-  if(!ready)throw new Error('Sổ lương chưa sẵn sàng. Vui lòng tải lại trang.');
-  if(writeLock.current)throw new Error('Đang lưu thay đổi trước đó.');
-  if(user&&!cloudReady)throw new Error('Chưa tải được sổ lương. Vui lòng tải lại trang.');
-  writeLock.current=true;setBusy(true);
-  try{if(client&&user){const rev=await saveLedger(client,next,revisionRef.current);revisionRef.current=rev;setRevision(rev)}else{if(localStorage.getItem(LOCAL_KEY)!==localRaw.current)throw new Error('Sổ đã thay đổi ở tab khác. Tải lại trang trước khi lưu tiếp.');const raw=JSON.stringify(next);localStorage.setItem(LOCAL_KEY,raw);localRaw.current=raw;setHasLocal(JSON.stringify(next)!==JSON.stringify(initialLedger()))}setData(next);setSyncError('');}
-  finally{writeLock.current=false;setBusy(false)}
- }
- async function view(p:Profile){if(!client)return;const ledger=await loadLedger(client,p.id);if(!ledger)throw new Error('Người dùng chưa cấp quyền xem cho bạn hoặc chưa lưu sổ lương.');setOwnData(data);setData(ledger.payload);setShared(p);setTab('overview')}
- function changeMonth(delta:number){const [y,m]=month.split('-').map(Number);const next=new Date(Date.UTC(y,m-1+delta,1)).toISOString().slice(0,7);setMonth(next);setSelected(next+'-01')}
- function openShift(s?:Shift,day?:string){setEditing(s);setDate(s?.date||day||(month===today().slice(0,7)?today():month+'-01'));setRoleId(s?.roleId||data.roles.find(x=>x.active)?.id||'');setStart(s?.start||'08:00');setEnd(s?.end||'13:00');setNote(s?.note||'');setFormError('');setModal('shift')}
- function openMoney(type:string){setAmount('');setDate(today());setNote('');setFormError('');setModal(type)}
- const preview=useMemo(()=>{if(modal!=='shift')return null;try{if(editing&&lockedDate(data,editing.date))return editing;return makeShift(data,{id:editing?.id,date,roleId,start,end,note},editing)}catch{return null}},[data,modal,editing,date,roleId,start,end,note]);
- async function saveForm(e:React.FormEvent){e.preventDefault();setFormError('');try{
-  if(modal==='recovery'){if(!client)throw new Error('Chưa kết nối.');const r=await client.auth.updateUser({password:newPassword});if(r.error)throw r.error;setNewPassword('');setModal('');toast.success('Đã đổi mật khẩu.');return}
-  const next=structuredClone(data);
-  if(modal==='shift'){const s=makeShift(data,{id:editing?.id,date,roleId,start,end,note:note.trim()},editing);next.shifts=[...data.shifts.filter(x=>x.id!==s.id),s];setSelected(date);setMonth(date.slice(0,7));}
-  else {const n=Number(amount);if(!amount.trim()||!Number.isFinite(n)||!Number.isInteger(n)||Math.abs(n)>1000000000)throw new Error('Số tiền phải là số nguyên hợp lệ.');if(modal==='payment'){if(n<0||!validDate(date))throw new Error('Kiểm tra số tiền và ngày nhận.');next.payments.push({id:uid(),month,date,amount:n,note:note.trim()});}else{if(stats.closed)throw new Error('Kỳ đã chốt. Mở lại trước khi sửa.');if(!note.trim())throw new Error('Hãy ghi lý do cộng/trừ.');next.adjustments.push({id:uid(),month,amount:n,note:note.trim()});}}
-  await commit(next);setModal('');toast.success('Đã lưu.');
- }catch(e){setFormError(errorMessage(e))}}
- function removeShift(s:Shift){setConfirm({title:'Xóa ca làm này?',text:shortDate(s.date)+' · '+s.roleName+' · '+s.start+'–'+s.end+'. Tổng lương sẽ được cập nhật.',action:async()=>{if(lockedDate(data,s.date))throw new Error('Kỳ đã chốt. Mở lại kỳ trước khi xóa.');await commit({...data,shifts:data.shifts.filter(x=>x.id!==s.id)});setModal('');toast.success('Đã xóa ca.')}})}
- function toggleLock(){setConfirm({title:stats.closed?'Mở lại kỳ lương?':'Chốt kỳ lương?',text:stats.closed?'Bạn sẽ có thể sửa ca và tính lại số tiền của kỳ này.':'Lưu tổng '+money(stats.expected)+' và khóa ca từ '+shortDate(stats.start)+' đến '+shortDate(stats.end)+'. Bạn vẫn nhập được tiền thực nhận.',action:async()=>{if(stats.closed)await commit({...data,settlements:data.settlements.filter(x=>x.month!==month)});else {if(data.settlements.some(s=>s.start<=stats.end&&s.end>=stats.start))throw new Error('Kỳ này giao với một kỳ đã chốt. Hãy kiểm tra cấu hình ngày chốt.');await commit({...data,settlements:[...data.settlements,{month,start:stats.start,end:stats.end,expected:stats.expected,payDate:stats.payDate,lockedAt:new Date().toISOString()}]})}toast.success(stats.closed?'Đã mở lại kỳ.':'Đã chốt kỳ.')}})}
- function recalculate(){setConfirm({title:'Tính lại toàn bộ ca trong kỳ?',text:'Áp dụng mức lương, hệ số lễ và quy tắc theo ngày làm từ cài đặt hiện có. Các đơn giá đã lưu trong kỳ chưa chốt sẽ được thay thế.',action:async()=>{if(stats.closed)throw new Error('Mở lại kỳ trước khi tính lại.');const ids=new Set(stats.shifts.map(x=>x.id));const next={...data,shifts:data.shifts.map(s=>ids.has(s.id)?makeShift(data,{id:s.id,date:s.date,roleId:s.roleId,start:s.start,end:s.end,note:s.note}):s)};await commit(next);toast.success('Đã tính lại kỳ.')}})}
- function exportCsv(){const rows=[['Ngày','Vị trí','Bắt đầu','Kết thúc','Số phút','Lương giờ','Hệ số','Phụ cấp đóng ca','Tiền ca','Ghi chú'],...stats.shifts.map(s=>[s.date,s.roleName,s.start,s.end,s.minutes,s.rate,s.multiplier,shiftBonus(s,stats.shifts),shiftAmount(s,stats.shifts),s.note]),['Tổng dự kiến',stats.expected],['Tổng thực nhận',stats.received],['Chênh lệch',stats.difference]];const csv='\ufeff'+rows.map(row=>row.map(v=>'"'+String(v).replace(/^[=+@-]/,"'").replaceAll('"','""')+'"').join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='ca-lam-'+month+'.csv';a.click();URL.revokeObjectURL(url)}
- function renderShift(s:Shift){return <div className="shift-row" key={s.id}><div className="shift-date"><strong>{s.date.slice(8)}</strong><small>TH {Number(s.date.slice(5,7))}</small></div><div className="shift-info"><p><span className="role-badge" style={{'--role-color':s.color} as React.CSSProperties}><i className="role-square" style={{background:s.color}}/>{s.roleName}</span>{s.closing>0&&<span className="closing-badge"><Moon size={10}/>Đóng ca</span>}{s.multiplier!==1&&<span className="chip">Lễ ×{s.multiplier}</span>}</p><small>{s.start} – {s.end} · {hours(s.minutes)} giờ</small>{s.note&&<small className="block">{s.note}</small>}</div><div className="shift-money">{money(shiftAmount(s,data.shifts))}<br/>{!readOnly&&<button className="edit-link" disabled={busy} onClick={()=>openShift(s)}><Pencil size={11}/> Chi tiết</button>}</div></div>}
- const roleTotals=data.roles.map(r=>{const list=stats.shifts.filter(s=>s.roleId===r.id);return {...r,total:list.reduce((n,s)=>n+shiftAmount(s,stats.shifts),0),minutes:list.reduce((n,s)=>n+s.minutes,0)}});
- const totalBonus=stats.shifts.reduce((n,s)=>n+shiftBonus(s,stats.shifts),0);
- const roundingDifference=stats.wages-totalBonus-stats.shifts.reduce((n,s)=>n+shiftBase(s),0);
- const [year,mon]=month.split('-').map(Number);const days=new Date(Date.UTC(year,mon,0)).getUTCDate(),offset=(new Date(Date.UTC(year,mon-1,1)).getUTCDay()+6)%7;
- const dayShifts=data.shifts.filter(s=>s.date===selected&&(filter==='all'||s.roleId===filter)).sort((a,b)=>a.start.localeCompare(b.start));
- return <><AppToaster/><header className="topbar"><div className="brand"><span className="brand-mark"><CalendarCheck2 size={23}/></span>ca làm<b>.</b></div><div className="top-status"><ThemeToggle/><span className="status-pill">{user?<Cloud size={13}/>:<HardDrive size={13}/>} {busy?'Đang lưu…':user?(cloudReady?'Đã đồng bộ':'Đang kết nối'):'Lưu trên thiết bị'}</span><button className="btn ghost" onClick={()=>setTab('account')}>{user?<><span className="avatar">{(profile?.display_name||'B').charAt(0).toUpperCase()}</span><span className="hidden sm:inline">{profile?.display_name||'Tài khoản'}</span></>:<><LogIn size={16}/>Đăng nhập</>}</button></div></header>
- <main className="wrap"><div className="page-head"><div><h1>{shared?'Sổ lương của '+shared.display_name:tabs.find(item=>item.id===tab)?.label||'Tổng quan'}</h1><p>{tab==='settings'?'Vị trí, đơn giá và quy tắc tính lương':tab==='account'?'Hồ sơ và quyền xem sổ lương':'Kỳ lương tháng '+mon+'/'+year}</p></div><div className="head-actions">{tab!=='account'&&tab!=='settings'&&<div className="month-control"><button onClick={()=>changeMonth(-1)} aria-label="Tháng trước"><ChevronLeft size={16}/></button><label className="month-field"><span>Tháng {String(mon).padStart(2,'0')}/{year}</span><input aria-label="Chọn tháng" type="month" value={month} onInput={e=>{if(/^\d{4}-\d{2}$/.test(e.currentTarget.value)){setMonth(e.currentTarget.value);setSelected(e.currentTarget.value+'-01')}}}/></label><button onClick={()=>changeMonth(1)} aria-label="Tháng sau"><ChevronRight size={16}/></button></div>}{!readOnly&&<button className="btn primary" disabled={!ready||busy||(!!user&&!cloudReady)} onClick={()=>openShift()}><Plus size={17}/>Thêm ca làm</button>}</div></div>
- {syncError&&<div className="error-message mb-5" role="alert">{syncError} <button className="btn" onClick={()=>window.location.reload()}>Tải lại</button></div>}
- {shared&&<div className="banner"><ShieldCheck size={17}/><span>Bạn đang xem sổ của @{shared.username}. Chỉ có quyền xem.</span><button className="btn ghost ml-auto" onClick={()=>{setShared(null);if(ownData)setData(ownData);setOwnData(null)}}>Về sổ của tôi</button></div>}
- <Tabs value={tab} onValueChange={setTab} className="main-tabs"><TabsList className="navtabs">{tabs.map(t=><TabsTrigger className="navtab" key={t.id} value={t.id}><t.icon size={17}/>{t.label}</TabsTrigger>)}</TabsList>
- <TabsContent value="overview"><div className="grid-main"><div><section className="summary"><div className="summary-top"><span>LƯƠNG DỰ KIẾN · THÁNG {mon}</span><span className="summary-tag">{stats.closed?<LockKeyhole size={12}/>:<Clock3 size={12}/>} {stats.closed?'Đã chốt':'Đang ghi nhận'}</span></div><div className="money">{new Intl.NumberFormat('vi-VN').format(stats.expected)} <span>₫</span></div><div className="summary-bottom"><span>Kỳ công {shortDate(stats.start)} – {shortDate(stats.end)}</span><span>Nhận dự kiến {shortDate(stats.payDate)} <ArrowUpRight className="inline" size={14}/></span></div></section><div className="metrics"><div className="metric"><div className="metric-icon"><Clock3 size={17}/></div><div className="value">{hours(stats.minutes)}<span>giờ</span></div><p>Tổng giờ làm</p></div><div className="metric"><div className="metric-icon amber"><CalendarDays size={17}/></div><div className="value">{stats.shifts.length}<span>ca</span></div><p>Trong {stats.days} ngày làm</p></div><div className="metric"><div className="metric-icon violet"><BriefcaseBusiness size={17}/></div><div className="value">{new Set(stats.shifts.map(x=>x.roleId)).size}<span>vị trí</span></div><p>Công việc đã làm</p></div></div><section className="card card-pad"><div className="section-head"><h2>Ca làm gần đây</h2><button className="link" onClick={()=>setTab('calendar')}>Xem lịch làm <ArrowRight size={14}/></button></div>{stats.shifts.length?stats.shifts.slice(0,5).map(renderShift):<Blank title="Chưa có ca làm trong kỳ" text="Thêm ca để tính lương dự kiến." action={!readOnly&&<button className="btn" onClick={()=>openShift()}><Plus size={16}/>Thêm ca làm</button>}/>}</section></div><aside className="right-stack"><section className="card card-pad"><div className="section-head"><h2>Thu nhập theo vị trí</h2><BriefcaseBusiness size={17} className="muted"/></div><div className="role-breakdown">{roleTotals.filter(r=>r.active||r.minutes).map(r=><div key={r.id}><div className="role-row-head"><span className="role-label"><i className="role-square" style={{background:r.color}}/>{r.name}</span><strong>{money(r.total)}</strong></div><div className="bar"><span style={{width:(stats.wages?r.total/stats.wages*100:0)+'%',background:r.color}}/></div><div className="role-sub"><span>{hours(r.minutes)} giờ làm</span><span>{stats.wages?Math.round(r.total/stats.wages*100):0}% thu nhập ca</span></div></div>)}</div><div className="divider"/><div className="total-row"><span className="muted">Phụ cấp đóng ca (đã gồm)</span><span>{money(totalBonus)}</span></div>{Math.abs(roundingDifference)>=1&&<div className="total-row"><span className="muted">Chênh lệch làm tròn</span><span>{money(roundingDifference)}</span></div>}<div className="total-row"><span className="muted">Khoản cộng / trừ</span><span>{money(stats.adjustment)}</span></div></section><section className="card card-pad"><h2>Ngày nhận lương</h2><div className="payday"><div className="date-tile"><small>THÁNG {Number(stats.payDate.slice(5,7))}</small><strong>{stats.payDate.slice(8)}</strong></div><div><h3>Lương tháng {mon}</h3><p className="small muted">{stats.payments.length?'Đã ghi nhận '+stats.payments.length+' lần nhận':'Chưa ghi nhận thực nhận'}</p></div></div><button className="btn w-full" onClick={()=>setTab('payroll')}>Đối chiếu lương <ArrowRight size={15}/></button></section></aside></div></TabsContent>
- <TabsContent value="calendar"><div className="grid-main"><section className="card card-pad"><div className="section-head"><h2>Lịch làm tháng {mon}</h2><div className="field"><Choose label="Lọc vị trí" value={filter} onChange={setFilter} items={[{value:'all',label:'Tất cả vị trí'},...data.roles.map(x=>({value:x.id,label:x.name}))]}/></div></div><div className="calendar">{['T2','T3','T4','T5','T6','T7','CN'].map(day=><div className="day-head" key={day}>{day}</div>)}{Array.from({length:offset},(_,i)=><div className="calendar-day blank" key={'blank'+i}/>)}{Array.from({length:days},(_,i)=>{const day=month+'-'+String(i+1).padStart(2,'0'),ss=data.shifts.filter(s=>s.date===day&&(filter==='all'||s.roleId===filter));return <button key={day} className={'calendar-day '+(selected===day?'selected ':'')+(day===today()?'today':'')} onClick={()=>setSelected(day)} aria-label={'Ngày '+shortDate(day)+', '+ss.length+' ca'}><span className="day-number">{i+1}</span>{[...new Set(ss.map(s=>s.roleId))].slice(0,2).map(id=>{const s=ss.find(x=>x.roleId===id)!;return <span key={id} className="calendar-role" style={{'--role-color':s.color} as React.CSSProperties}>{s.roleName}</span>})}{new Set(ss.map(s=>s.roleId)).size>2&&<span className="calendar-role">+ vị trí khác</span>}{ss.length>0&&<strong>{new Intl.NumberFormat('vi-VN',{notation:'compact',maximumFractionDigits:0}).format(ss.reduce((sum,s)=>sum+shiftAmount(s,data.shifts),0)).replace(/\s*N$/,'k').replace(/\s*Tr$/,'tr')}</strong>}</button>})}</div><div className="calendar-legend">{data.roles.map(r=><span key={r.id}><i className="role-square" style={{background:r.color}}/>{r.name}</span>)}</div></section><section className="card card-pad h-fit"><div className="section-head"><h2>Ngày {shortDate(selected)}</h2>{!readOnly&&<button className="btn icon" aria-label="Thêm ca vào ngày đã chọn" onClick={()=>openShift(undefined,selected)}><Plus size={16}/></button>}</div>{dayShifts.length?dayShifts.map(renderShift):<Blank title="Chưa có ca làm" text="Những ca làm trong ngày này sẽ xuất hiện ở đây."/>}{dayShifts.length>0&&<><div className="divider"/><div className="total-row"><strong>{filter==='all'?'Tổng ngày':'Tổng đang lọc'}</strong><strong>{money(dayShifts.reduce((n,s)=>n+shiftAmount(s,data.shifts),0))}</strong></div></>}</section></div></TabsContent>
- <TabsContent value="payroll"><div className="reconcile-grid"><section className="card card-pad"><div className="section-head"><h2>Đối chiếu tháng {mon}</h2><span className="chip">{stats.closed?'Đã chốt':'Chưa chốt'}</span></div><div className="total-row"><span className="muted">Tiền ca (gồm phụ cấp)</span><strong>{money(stats.wages)}</strong></div><div className="total-row"><span className="muted">Khoản cộng / trừ</span><strong>{money(stats.adjustment)}</strong></div><div className="divider"/><div className="comparison"><p className="small muted">Lương dự kiến</p><strong>{money(stats.expected)}</strong><p className="helper">Kỳ {shortDate(stats.start)} – {shortDate(stats.end)}</p></div><div className={'difference '+(stats.payments.length?(stats.difference<0?'negative':'positive'):'')}><div className="total-row"><span>Đã thực nhận</span><strong>{money(stats.received)}</strong></div><div className="total-row"><span>{!stats.payments.length?'Trạng thái':stats.difference===0?'Đối chiếu':stats.difference<0?'Còn thiếu':'Nhận dư'}</span><strong>{!stats.payments.length?'Chưa nhận':stats.difference===0?'Khớp lương':money(Math.abs(stats.difference))}</strong></div></div>{!readOnly&&<div className="form-footer flex-wrap"><button className="btn" onClick={toggleLock} disabled={busy}><LockKeyhole size={15}/>{stats.closed?'Mở lại kỳ':'Chốt kỳ'}</button><button className="btn primary" onClick={()=>openMoney('payment')} disabled={busy}><Plus size={16}/>Nhập thực nhận</button></div>}<div className="divider"/><div className="row-actions flex-wrap"><button className="btn" onClick={exportCsv}><Download size={15}/>Xuất CSV</button>{!readOnly&&<button className="btn ghost" disabled={busy||!!stats.closed} onClick={recalculate}><RefreshCw size={14}/>Tính lại kỳ</button>}</div></section><div className="right-stack"><section className="card card-pad"><div className="section-head"><h2>Lịch sử nhận lương</h2><Wallet size={18} className="muted"/></div>{stats.payments.length?stats.payments.map(p=><div className="list-item" key={p.id}><div>{money(p.amount)}<small>{shortDate(p.date)}/{p.date.slice(0,4)}{p.note?' · '+p.note:''}</small></div>{!readOnly&&<button className="btn ghost icon" aria-label="Xóa lần nhận" onClick={()=>setConfirm({title:'Xóa lần nhận lương?',text:'Chênh lệch thực nhận sẽ được tính lại.',action:async()=>{await commit({...data,payments:data.payments.filter(x=>x.id!==p.id)})}})}><Trash2 size={15}/></button>}</div>):<Blank title="Chưa ghi nhận tiền nhận" text={'Ngày nhận dự kiến '+shortDate(stats.payDate)+'. Nhập số tiền khi bạn nhận lương để đối chiếu.'}/>}</section><section className="card card-pad"><div className="section-head"><h2>Khoản cộng / trừ</h2>{!readOnly&&<button className="btn icon" disabled={!!stats.closed||busy} aria-label="Thêm khoản cộng trừ" onClick={()=>openMoney('adjustment')}><Plus size={16}/></button>}</div>{data.adjustments.filter(x=>x.month===month).length?data.adjustments.filter(x=>x.month===month).map(a=><div className="list-item" key={a.id}><div>{a.note}<small>{a.amount>=0?'+':''}{money(a.amount)}</small></div>{!readOnly&&<button disabled={!!stats.closed||busy} className="btn ghost icon" aria-label="Xóa khoản điều chỉnh" onClick={()=>setConfirm({title:'Xóa khoản điều chỉnh?',text:a.note,action:async()=>{await commit({...data,adjustments:data.adjustments.filter(x=>x.id!==a.id)})}})}><Trash2 size={15}/></button>}</div>):<p className="helper">Thưởng, phụ cấp khác, tạm ứng hoặc khấu trừ. Mỗi khoản đều có lý do để kiểm tra lại.</p>}</section></div></div></TabsContent>
- <TabsContent value="settings"><PayrollSettings data={data} commit={commit} busy={busy} readOnly={readOnly}/></TabsContent>
- <TabsContent value="account">{shared?<div className="banner">Quay về sổ của bạn để quản lý tài khoản và quyền chia sẻ.</div>:<><AccountPanel key={profile?.id||'guest'} client={client} user={user} profile={profile} onProfile={setProfile} onView={view} busy={busy}/>{user&&cloudReady&&hasLocal&&revision===0&&<div className="hint-card mt-5"><h3>Dữ liệu đã ghi trên thiết bị</h3><p className="helper">Tài khoản này chưa lưu sổ. Bạn có thể chuyển sổ trên thiết bị vào tài khoản hiện tại.</p><button className="btn mt-3" onClick={()=>setConfirm({title:'Chuyển sổ trên thiết bị vào tài khoản?',text:'Dữ liệu sẽ được lưu vào tài khoản '+(user.email||'hiện tại')+'. Chỉ thực hiện nếu đây là sổ của bạn.',action:async()=>{await commit(parseLocal());toast.success('Đã chuyển dữ liệu vào tài khoản.')}})}>Chuyển dữ liệu</button></div>}</>}</TabsContent>
- </Tabs><div className="notice-line"><span className="footer-caption">{user?<><ShieldCheck size={13}/>Dữ liệu riêng tư · Bạn kiểm soát quyền chia sẻ</>:<><HardDrive size={13}/>Dữ liệu chỉ trên trình duyệt này · Chưa đồng bộ tài khoản</>}</span><span>Đơn vị: VND · Giờ Việt Nam</span></div></main>
- <Modal open={!!modal} onClose={()=>setModal('')} title={modal==='shift'?(editing?'Chi tiết ca làm':'Thêm ca làm'):modal==='payment'?'Ghi nhận lương thực nhận':modal==='recovery'?'Đặt mật khẩu mới':'Thêm khoản cộng / trừ'} description={modal==='shift'?'Chọn vị trí và thời gian. Phụ cấp đóng ca được tính tự động.':modal==='recovery'?'Nhập mật khẩu mới cho tài khoản của bạn.':'Gắn với kỳ lương tháng '+mon+'/'+year+'.'}><form className="form-stack" onSubmit={saveForm}>
- {modal==='shift'?<><fieldset className="form-grid" disabled={!!editing&&lockedDate(data,editing.date)}><Field label="Ngày làm"><DatePicker label="Ngày làm" value={date} onChange={setDate}/></Field><Field label="Vị trí làm việc"><Choose label="Chọn vị trí" value={roleId} onChange={setRoleId} items={data.roles.filter(r=>r.active||r.id===editing?.roleId).map(r=>({value:r.id,label:r.name}))}/></Field><Field label="Giờ bắt đầu"><TimePicker label="Giờ bắt đầu" value={start} onChange={setStart}/></Field><Field label="Giờ kết thúc"><TimePicker label="Giờ kết thúc" value={end} onChange={setEnd}/></Field><Field label="Ghi chú (không bắt buộc)" className="full"><input maxLength={300} value={note} onChange={e=>setNote(e.target.value)} placeholder="Ghi chú cho ca làm này…"/></Field></fieldset>{preview?<div className="calc-preview"><div><p>{hours(preview.minutes)} giờ × {money(preview.rate)}/h{preview.multiplier!==1?' × '+preview.multiplier:''}</p><small className="muted">{preview.closing?'Đóng ca +'+money(preview.closing*preview.closingMultiplier):'Đơn giá theo ngày làm'}{preview.holiday?' · '+preview.holiday:''}</small></div><strong>{money(shiftAmount(preview,[...data.shifts.filter(x=>x.id!==preview.id),preview]))}</strong></div>:<p className="helper">Nhập giờ hợp lệ và thiết lập mức lương để xem tiền ca.</p>}{editing&&<p className="helper">{lockedDate(data,editing.date)?'Kỳ đã chốt. Mở lại kỳ để sửa ca.':'Sửa ngày, giờ hoặc vị trí sẽ tính lại tiền ca. Sửa ghi chú giữ nguyên số tiền.'}</p>}</>:modal==='recovery'?<Field label="Mật khẩu mới"><input type="password" required minLength={8} autoComplete="new-password" value={newPassword} onChange={e=>setNewPassword(e.target.value)}/></Field>:<><Field label={modal==='payment'?'Số tiền thực nhận (đ)':'Số tiền (âm để trừ, dương để cộng)'}><input type="number" required step="1" min={modal==='payment'?0:undefined} value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0"/></Field>{modal==='payment'&&<Field label="Ngày nhận thực tế"><DatePicker label="Ngày nhận thực tế" value={date} onChange={setDate}/></Field>}<Field label={modal==='payment'?'Ghi chú (không bắt buộc)':'Lý do điều chỉnh'}><input maxLength={300} required={modal==='adjustment'} value={note} onChange={e=>setNote(e.target.value)} placeholder={modal==='payment'?'Ví dụ: Chuyển khoản':'Ví dụ: Thưởng chuyên cần'}/></Field></>}
- {formError&&<p className="error-message" role="alert">{formError}</p>}<div className="form-footer">{editing&&modal==='shift'&&<button type="button" className="btn danger icon mr-auto" disabled={busy||lockedDate(data,editing.date)} aria-label="Xóa ca làm" onClick={()=>removeShift(editing)}><Trash2 size={17}/></button>}<button type="button" className="btn" onClick={()=>setModal('')}>Đóng</button><button type="submit" className="btn primary" disabled={busy||readOnly||(modal==='shift'&&!!editing&&lockedDate(data,editing.date))}>{busy?'Đang lưu…':'Lưu'}</button></div></form></Modal>
- <AlertDialog open={!!confirm} onOpenChange={v=>!v&&!busy&&setConfirm(null)}><AlertDialogContent><AlertDialogTitle>{confirm?.title}</AlertDialogTitle><AlertDialogDescription>{confirm?.text}</AlertDialogDescription><AlertDialogFooter><AlertDialogCancel disabled={busy}>Hủy</AlertDialogCancel><button className="btn primary" disabled={busy} onClick={async()=>{try{await confirm?.action();setConfirm(null)}catch(e){toast.error(errorMessage(e))}}}>{busy?'Đang xử lý…':'Xác nhận'}</button></AlertDialogFooter></AlertDialogContent></AlertDialog>
- </>;
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { SupabaseClient, User } from "@supabase/supabase-js";
+import {
+  CalendarCheck2,
+  CalendarDays,
+  Clock3,
+  LayoutDashboard,
+  LogIn,
+  LogOut,
+  Pencil,
+  Plus,
+  Settings2,
+  Trash2,
+  Users,
+  Wallet,
+} from "lucide-react";
+import { toast } from "sonner";
+import { DatePicker, TimePicker } from "@/components/payroll-pickers";
+import { AppToaster, ThemeToggle } from "@/components/theme-controls";
+import { Blank, Choose, Field, Modal } from "@/components/payroll-ui";
+import PayrollSettings from "@/components/payroll-settings";
+import PayrollReconciliation from "@/components/payroll-reconciliation";
+import SocialFriends from "@/components/social-friends";
+import SocialNotifications, { NotificationPreferences } from "@/components/social-notifications";
+import SocialProfile from "@/components/social-profile";
+import { cloudClient, loadLedger, saveLedger, type Profile } from "@/lib/cloud";
+import { errorMessage } from "@/lib/errors";
+import { parseLedger } from "@/lib/ledger-schema";
+import {
+  initialLedger,
+  defaultPayrollMonth,
+  lockedDate,
+  makeShift,
+  money,
+  periodForecast,
+  shiftAmount,
+  shiftStatus,
+  shortDate,
+  today,
+  type Ledger,
+  type Shift,
+} from "@/lib/payroll";
+
+const LOCAL_KEY = "ca-lam-local-v1";
+const navigation = [
+  ["overview", "Tổng quan", LayoutDashboard],
+  ["calendar", "Lịch làm", CalendarDays],
+  ["friends", "Bạn bè", Users],
+  ["payroll", "Kỳ lương", Wallet],
+  ["settings", "Cài đặt", Settings2],
+] as const;
+type Tab = (typeof navigation)[number][0];
+function fromDevice(): Ledger {
+  const raw = localStorage.getItem(LOCAL_KEY);
+  return raw ? parseLedger(JSON.parse(raw)) : initialLedger();
+}
+
+export default function PayrollApp() {
+  const [ledger, setLedger] = useState<Ledger>(initialLedger);
+  const [tab, setTab] = useState<Tab>("overview");
+  const [month, setMonth] = useState(today().slice(0, 7)),
+    [payrollMonth, setPayrollMonth] = useState(today().slice(0, 7)),
+    [selected, setSelected] = useState(today()),
+    [now, setNow] = useState(new Date());
+  const [client, setClient] = useState<SupabaseClient | null>(null),
+    [user, setUser] = useState<User | null>(null),
+    [profile, setProfile] = useState<Profile | null>(null);
+  const [busy, setBusy] = useState(false),
+    [ready, setReady] = useState(false),
+    [error, setError] = useState("");
+  const [shiftModal, setShiftModal] = useState(false),
+    [editing, setEditing] = useState<Shift | null>(null),
+    [date, setDate] = useState(today()),
+    [roleId, setRoleId] = useState("cook"),
+    [start, setStart] = useState("08:00"),
+    [end, setEnd] = useState("13:00"),
+    [note, setNote] = useState(""),
+    [formError, setFormError] = useState("");
+  const [conversation, setConversation] = useState("");
+  const [email, setEmail] = useState(""),
+    [password, setPassword] = useState(""),
+    [signUp, setSignUp] = useState(false);
+  const revision = useRef(0),
+    deviceSnapshot = useRef<string | null>(null),
+    payrollMonthInitialized = useRef(false);
+  const totals = useMemo(
+    () => periodForecast(ledger, month, now),
+    [ledger, month, now],
+  );
+
+  useEffect(() => {
+    if (!ready || payrollMonthInitialized.current) return;
+    setPayrollMonth(defaultPayrollMonth(ledger, now));
+    payrollMonthInitialized.current = true;
+  }, [ledger, now, ready]);
+
+  useEffect(() => {
+    try {
+      deviceSnapshot.current = localStorage.getItem(LOCAL_KEY);
+      setLedger(fromDevice());
+      setReady(true);
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }, []);
+  useEffect(() => {
+    let timer: number | undefined;
+    const refresh = () => setNow(new Date());
+    const schedule = () => {
+      window.clearTimeout(timer);
+      if (document.visibilityState !== "visible") return;
+      timer = window.setTimeout(() => {
+        refresh();
+        schedule();
+      }, 60_000 - (Date.now() % 60_000));
+    };
+    const visibility = () => {
+      if (document.visibilityState === "visible") refresh();
+      schedule();
+    };
+    schedule();
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, []);
+  useEffect(() => {
+    let alive = true;
+    let unsubscribe: undefined | (() => void);
+    void cloudClient()
+      .then(async (service) => {
+        if (!alive) return;
+        setClient(service);
+        if (!service) return;
+        const {
+          data: { session },
+        } = await service.auth.getSession();
+        setUser(session?.user || null);
+        const watch = service.auth.onAuthStateChange((_event, next) =>
+          setUser(next?.user || null),
+        );
+        unsubscribe = () => watch.data.subscription.unsubscribe();
+      })
+      .catch((e) => setError(errorMessage(e)));
+    return () => {
+      alive = false;
+      unsubscribe?.();
+    };
+  }, []);
+  useEffect(() => {
+    let alive = true;
+    if (!client || !user) {
+      setProfile(null);
+      return;
+    }
+    void (async () => {
+      try {
+        let item = await client
+          .from("profiles")
+          .select("*")
+          .eq("id", user.id)
+          .maybeSingle();
+        if (item.error) throw item.error;
+        if (!item.data) {
+          const created = await client
+            .from("profiles")
+            .insert({
+              id: user.id,
+              username: "user_" + user.id.replaceAll("-", "").slice(0, 16),
+              display_name: String(
+                user.user_metadata?.display_name || "Người dùng",
+              ).slice(0, 80),
+            })
+            .select()
+            .single();
+          if (created.error) throw created.error;
+          item = created;
+        }
+        const remote = await loadLedger(client, user.id);
+        if (!alive) return;
+        setProfile(item.data as Profile);
+        setLedger(remote?.payload || initialLedger());
+        revision.current = remote?.revision || 0;
+        setReady(true);
+      } catch (e) {
+        if (alive) setError(errorMessage(e));
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [client, user]);
+  async function commit(next: Ledger) {
+    if (!ready) throw new Error("Sổ lương chưa sẵn sàng.");
+    setBusy(true);
+    try {
+      if (client && user)
+        revision.current = await saveLedger(client, next, revision.current);
+      else {
+        if (localStorage.getItem(LOCAL_KEY) !== deviceSnapshot.current)
+          throw new Error("Dữ liệu đã thay đổi ở tab khác.");
+        const raw = JSON.stringify(next);
+        localStorage.setItem(LOCAL_KEY, raw);
+        deviceSnapshot.current = raw;
+      }
+      setLedger(next);
+    } finally {
+      setBusy(false);
+    }
+  }
+  function openShift(shift?: Shift, day?: string) {
+    setEditing(shift || null);
+    setDate(shift?.date || day || today());
+    setRoleId(shift?.roleId || ledger.roles.find((x) => x.active)?.id || "");
+    setStart(shift?.start || "08:00");
+    setEnd(shift?.end || "13:00");
+    setNote(shift?.note || "");
+    setFormError("");
+    setShiftModal(true);
+  }
+  async function saveShift(event: React.FormEvent) {
+    event.preventDefault();
+    try {
+      const next = makeShift(
+        ledger,
+        { id: editing?.id, date, roleId, start, end, note: note.trim() },
+        editing || undefined,
+      );
+      await commit({
+        ...ledger,
+        shifts: [...ledger.shifts.filter((x) => x.id !== next.id), next],
+      });
+      setMonth(date.slice(0, 7));
+      setSelected(date);
+      setShiftModal(false);
+      toast.success("Đã lưu ca làm.");
+    } catch (e) {
+      setFormError(errorMessage(e));
+    }
+  }
+  async function signIn(event: React.FormEvent) {
+    event.preventDefault();
+    if (!client) return;
+    try {
+      const result = signUp
+        ? await client.auth.signUp({
+            email,
+            password,
+            options: { emailRedirectTo: window.location.origin },
+          })
+        : await client.auth.signInWithPassword({ email, password });
+      if (result.error) throw result.error;
+      toast.success(
+        signUp ? "Hãy kiểm tra email để xác nhận tài khoản." : "Đã đăng nhập.",
+      );
+      setPassword("");
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+  const row = (shift: Shift) => {
+    const status = shiftStatus(shift, now);
+    return (
+      <div className="shift-row" key={shift.id}>
+        <div className="shift-date">
+          <strong>{shift.date.slice(8)}</strong>
+          <small>
+            {status === "completed"
+              ? "Đã xong"
+              : status === "today"
+                ? "Hôm nay"
+                : "Sắp tới"}
+          </small>
+        </div>
+        <div className="shift-info">
+          <p>
+            <span
+              className="role-badge"
+              style={{ "--role-color": shift.color } as React.CSSProperties}
+            >
+              {shift.roleName}
+            </span>
+          </p>
+          <small>
+            {shift.start} - {shift.end}
+            {shift.note ? " · " + shift.note : ""}
+          </small>
+        </div>
+        <div className="shift-money">
+          {money(shiftAmount(shift, ledger.shifts))}
+          <button className="edit-link" onClick={() => openShift(shift)}>
+            <Pencil size={12} />
+            Sửa
+          </button>
+        </div>
+      </div>
+    );
+  };
+  const [year, numberMonth] = month.split("-").map(Number),
+    days = new Date(Date.UTC(year, numberMonth, 0)).getUTCDate(),
+    offset = (new Date(Date.UTC(year, numberMonth - 1, 1)).getUTCDay() + 6) % 7;
+  const calendar = (
+    <div className="calendar">
+      {["T2", "T3", "T4", "T5", "T6", "T7", "CN"].map((day) => (
+        <div className="day-head" key={day}>
+          {day}
+        </div>
+      ))}
+      {Array.from({ length: offset }, (_, i) => (
+        <div className="calendar-day blank" key={"b" + i} />
+      ))}
+      {Array.from({ length: days }, (_, i) => {
+        const day = `${month}-${String(i + 1).padStart(2, "0")}`,
+          shifts = ledger.shifts.filter((x) => x.date === day);
+        const status = shifts.some((x) => shiftStatus(x, now) === "completed")
+          ? "completed"
+          : day === today()
+            ? "today"
+            : "future";
+        return (
+          <button
+            key={day}
+            onClick={() => setSelected(day)}
+            className={
+              "calendar-day " + status + (selected === day ? " selected" : "")
+            }
+          >
+            <span className="day-number">{i + 1}</span>
+            {shifts.slice(0, 2).map((x) => (
+              <span
+                className="calendar-role"
+                style={{ "--role-color": x.color } as React.CSSProperties}
+                key={x.id}
+              >
+                {x.start} {x.roleName}
+              </span>
+            ))}
+            {shifts.length > 0 && (
+              <small>
+                {status === "completed"
+                  ? "Đã xong"
+                  : status === "today"
+                    ? "Hôm nay"
+                    : "Sắp tới"}
+              </small>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+  const profilePane = user ? (
+    <SocialProfile client={client} user={user} />
+  ) : (
+    <section className="card card-pad auth-panel">
+      <h2>{signUp ? "Tạo tài khoản" : "Đăng nhập"}</h2>
+      {!client && (
+        <p className="helper mt-3">
+          Chưa kết nối Supabase. Dữ liệu chỉ lưu trên thiết bị.
+        </p>
+      )}
+      <form className="form-stack mt-5" onSubmit={signIn}>
+        <Field label="Email">
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+        </Field>
+        <Field label="Mật khẩu">
+          <input
+            type="password"
+            minLength={8}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </Field>
+        <button className="btn primary" disabled={!client}>
+          {signUp ? "Đăng ký" : "Đăng nhập"}
+        </button>
+        <button
+          className="btn ghost"
+          type="button"
+          onClick={() => setSignUp((x) => !x)}
+        >
+          {signUp ? "Quay lại đăng nhập" : "Tạo tài khoản"}
+        </button>
+      </form>
+    </section>
+  );
+  return (
+    <>
+      <AppToaster />
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand-mark">
+            <CalendarCheck2 size={21} />
+          </span>
+          ShiftTrack<b>.</b>
+        </div>
+        <div className="top-status">
+          <ThemeToggle />
+          <SocialNotifications
+            client={client}
+            user={user}
+            onOpenFriends={(friendshipId) => {
+              if (friendshipId) setConversation(friendshipId);
+              setTab("friends");
+            }}
+          />
+          <button className="btn ghost" onClick={() => setTab("settings")}>
+            {user ? (
+              <span className="avatar">
+                {profile?.display_name[0]?.toUpperCase() || "B"}
+              </span>
+            ) : (
+              <>
+                <LogIn size={16} />
+                Đăng nhập
+              </>
+            )}
+          </button>
+        </div>
+      </header>
+      <main className="app-shell">
+        <aside className="desktop-nav">
+          {navigation.map(([id, label, Icon]) => (
+            <button
+              className={tab === id ? "active" : ""}
+              onClick={() => setTab(id)}
+              key={id}
+            >
+              <Icon size={18} />
+              {label}
+            </button>
+          ))}
+        </aside>
+        <div className="wrap">
+          <div className="page-head">
+            <div>
+              <h1>{navigation.find((x) => x[0] === tab)?.[1]}</h1>
+              <p>
+                {tab === "overview"
+                  ? "Kỳ công " +
+                    shortDate(totals.start) +
+                    " - " +
+                    shortDate(totals.end)
+                  : tab === "calendar"
+                    ? "Lịch làm của bạn"
+                    : tab === "payroll"
+                      ? "Kiểm tra lương sau khi nhận"
+                      : tab === "settings"
+                        ? "Tài khoản, lương và tùy chọn ứng dụng"
+                        : "Không gian riêng tư của bạn"}
+              </p>
+            </div>
+            {(tab === "overview" || tab === "calendar") && (
+              <button className="btn primary" onClick={() => openShift()}>
+                <Plus size={16} />
+                Thêm ca
+              </button>
+            )}
+          </div>
+          {error && (
+            <p className="error-message" role="alert">
+              {error}
+            </p>
+          )}
+          <nav className="navtabs">
+            {navigation.map(([id, label, Icon]) => (
+              <button
+                key={id}
+                className={"navtab " + (tab === id ? "active" : "")}
+                onClick={() => setTab(id)}
+              >
+                <Icon size={17} />
+                {label}
+              </button>
+            ))}
+          </nav>
+          {tab === "overview" && (
+            <div className="grid-main">
+              <div>
+                <section className="summary">
+                  <div className="summary-top">
+                    <span>KỲ CÔNG THÁNG {month.slice(5)}</span>
+                    <span className="summary-tag">
+                      {totals.closed ? "Đã chốt" : "Đang ghi nhận"}
+                    </span>
+                  </div>
+                  <div className="forecast-values">
+                    <div>
+                      <small>ĐÃ TÍCH LŨY</small>
+                      <strong>{money(totals.earnedExpected)}</strong>
+                    </div>
+                    <div>
+                      <small>DỰ KIẾN CUỐI KỲ</small>
+                      <strong>{money(totals.forecastExpected)}</strong>
+                    </div>
+                  </div>
+                  <div className="summary-bottom">
+                    <span>{totals.earnedShifts.length} ca đã hoàn thành</span>
+                    <span>{totals.futureShifts.length} ca sắp tới</span>
+                  </div>
+                </section>
+                <div className="metrics">
+                  <div className="metric">
+                    <Clock3 size={17} />
+                    <div className="value">
+                      {Math.round(totals.minutes / 6) / 10}
+                      <span>giờ</span>
+                    </div>
+                    <p>Tổng giờ trong kỳ</p>
+                  </div>
+                  <div className="metric">
+                    <CalendarDays size={17} />
+                    <div className="value">
+                      {totals.shifts.length}
+                      <span>ca</span>
+                    </div>
+                    <p>Ca làm trong kỳ</p>
+                  </div>
+                  <div className="metric">
+                    <Wallet size={17} />
+                    <div className="value">{money(totals.forecastWages)}</div>
+                    <p>Tiền ca sắp tới</p>
+                  </div>
+                </div>
+                <section className="card card-pad">
+                  <div className="section-head">
+                    <h2>Ca hôm nay và sắp tới</h2>
+                    <button
+                      className="btn ghost"
+                      onClick={() => setTab("calendar")}
+                    >
+                      Mở lịch
+                    </button>
+                  </div>
+                  {totals.futureShifts.slice(0, 5).map(row)}
+                  {!totals.futureShifts.length && (
+                    <Blank
+                      title="Chưa có ca sắp tới"
+                      text="Thêm ca làm để xem dự kiến cuối kỳ."
+                    />
+                  )}
+                </section>
+              </div>
+              <aside className="right-stack">
+                <section className="card card-pad">
+                  <h2>Tiến độ kỳ công</h2>
+                  <p className="helper mt-3">
+                    {totals.earnedShifts.length}/{totals.shifts.length} ca đã
+                    kết thúc.
+                  </p>
+                  <div className="bar mt-3">
+                    <span
+                      style={{
+                        width:
+                          (totals.shifts.length
+                            ? (totals.earnedShifts.length /
+                                totals.shifts.length) *
+                              100
+                            : 0) + "%",
+                      }}
+                    />
+                  </div>
+                </section>
+                <section className="card card-pad">
+                  <h2>Thu nhập theo vị trí</h2>
+                  {ledger.roles.map((role) => {
+                    const shifts = totals.shifts.filter(
+                      (x) => x.roleId === role.id,
+                    );
+                    return shifts.length ? (
+                      <div className="total-row" key={role.id}>
+                        <span>{role.name}</span>
+                        <strong>
+                          {money(
+                            shifts.reduce(
+                              (sum, x) => sum + shiftAmount(x, totals.shifts),
+                              0,
+                            ),
+                          )}
+                        </strong>
+                      </div>
+                    ) : null;
+                  })}
+                </section>
+              </aside>
+            </div>
+          )}
+          {tab === "calendar" && (
+            <div className="grid-main">
+              <section className="card card-pad">
+                <div className="section-head">
+                  <h2>
+                    Lịch làm tháng {numberMonth}/{year}
+                  </h2>
+                  <button
+                    className="btn icon"
+                    aria-label="Thêm ca"
+                    onClick={() => openShift(undefined, selected)}
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
+                {calendar}
+              </section>
+              <section className="card card-pad">
+                <h2>Ngày {shortDate(selected)}</h2>
+                {ledger.shifts
+                  .filter((x) => x.date === selected)
+                  .sort((a, b) => a.start.localeCompare(b.start))
+                  .map(row)}
+              </section>
+            </div>
+          )}
+          {tab === "friends" && (
+            <SocialFriends
+              key={conversation}
+              client={client}
+              user={user}
+              initialConversation={conversation}
+            />
+          )}
+          {tab === "payroll" && (
+            <PayrollReconciliation
+              key={payrollMonth}
+              data={ledger}
+              month={payrollMonth}
+              onMonthChange={setPayrollMonth}
+              commit={commit}
+              busy={busy}
+            />
+          )}{" "}
+          {tab === "settings" && (
+            <div className="settings-hub">
+              <section className="settings-account">
+                <div className="section-head">
+                  <div>
+                    <h2>Tài khoản & hồ sơ</h2>
+                    <p className="helper">Thông tin hiển thị với bạn bè và tài khoản đăng nhập.</p>
+                  </div>
+                </div>
+                {profilePane}
+                {user && (
+                  <button
+                    className="btn ghost"
+                    onClick={async () => {
+                      const result = await client?.auth.signOut();
+                      if (result?.error) setError(errorMessage(result.error));
+                      else toast.success("Đã đăng xuất.");
+                    }}
+                  >
+                    <LogOut size={16} />
+                    Đăng xuất
+                  </button>
+                )}
+              </section>
+              <div className="settings-utilities">
+                <section className="card card-pad">
+                  <h2>Giao diện</h2>
+                  <p className="helper mt-2">Chọn giao diện phù hợp với môi trường làm việc của bạn.</p>
+                  <div className="settings-control-row"><span>Chế độ tối</span><ThemeToggle /></div>
+                </section>
+                <NotificationPreferences client={client} user={user} />
+              </div>
+              <PayrollSettings
+                data={ledger}
+                commit={commit}
+                busy={busy}
+                readOnly={false}
+              />
+            </div>
+          )}{" "}
+        </div>
+      </main>
+      <Modal
+        open={shiftModal}
+        onClose={() => setShiftModal(false)}
+        title={editing ? "Sửa ca làm" : "Thêm ca làm"}
+        description="Nhập ngày, vị trí và giờ làm."
+      >
+        <form className="form-stack" onSubmit={saveShift}>
+          <fieldset
+            className="form-grid"
+            disabled={!!editing && lockedDate(ledger, editing.date)}
+          >
+            <Field label="Ngày làm">
+              <DatePicker label="Ngày làm" value={date} onChange={setDate} />
+            </Field>
+            <Field label="Vị trí">
+              <Choose
+                label="Vị trí"
+                value={roleId}
+                onChange={setRoleId}
+                items={ledger.roles
+                  .filter((x) => x.active || x.id === editing?.roleId)
+                  .map((x) => ({ value: x.id, label: x.name }))}
+              />
+            </Field>
+            <Field label="Giờ bắt đầu">
+              <TimePicker
+                label="Giờ bắt đầu"
+                value={start}
+                onChange={setStart}
+              />
+            </Field>
+            <Field label="Giờ kết thúc">
+              <TimePicker label="Giờ kết thúc" value={end} onChange={setEnd} />
+            </Field>
+            <Field label="Ghi chú" className="full">
+              <input
+                value={note}
+                maxLength={300}
+                onChange={(e) => setNote(e.target.value)}
+              />
+            </Field>
+          </fieldset>
+          {formError && (
+            <p role="alert" className="error-message">
+              {formError}
+            </p>
+          )}
+          <div className="form-footer">
+            {editing && (
+              <button
+                type="button"
+                className="btn icon danger"
+                aria-label="Xóa ca"
+                onClick={async () => {
+                  try {
+                    await commit({
+                      ...ledger,
+                      shifts: ledger.shifts.filter((x) => x.id !== editing.id),
+                    });
+                    setShiftModal(false);
+                  } catch (e) {
+                    setFormError(errorMessage(e));
+                  }
+                }}
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setShiftModal(false)}
+            >
+              Đóng
+            </button>
+            <button className="btn primary" disabled={busy}>
+              Lưu
+            </button>
+          </div>
+        </form>
+      </Modal>
+    </>
+  );
 }

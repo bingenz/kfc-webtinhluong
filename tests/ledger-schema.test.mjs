@@ -8,6 +8,11 @@ test('Sổ v1 hiện có giữ nguyên khi kiểm tra dữ liệu',()=>{
   d.shifts.push(makeShift(d,{date:'2026-09-09',roleId:'cook',start:'17:30',end:'22:00',note:''}));
   assert.deepEqual(parseLedger(JSON.parse(JSON.stringify(d))),d);
 });
+test('Sổ đã lưu trước khi có xác nhận đối soát vẫn đọc được',()=>{
+  const legacy=initialLedger();delete legacy.reconciliations;
+  const parsed=parseLedger(legacy);
+  assert.deepEqual(parsed.reconciliations,[]);
+});
 test('Sổ thiếu cấu hình hoặc có số tiền sai bị từ chối, không sửa dữ liệu gốc',()=>{
   const d=initialLedger();d.rules=[];const before=JSON.stringify(d);
   assert.throws(()=>parseLedger(d),/Dữ liệu gốc vẫn được giữ nguyên/);

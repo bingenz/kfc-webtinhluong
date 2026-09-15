@@ -3,8 +3,8 @@ import "./globals.css";
 import { AppTheme } from "@/components/theme-controls";
 
 export const metadata: Metadata = {
-  title: "Ca Làm — Sổ lương của bạn",
-  description: "Ghi ca làm theo vị trí, tính lương và đối chiếu thu nhập hàng tháng.",
+  title: "ShiftTrack — Theo dõi giờ làm và kỳ lương",
+  description: "Theo dõi giờ làm, tính lương và kiểm tra kỳ lương của bạn.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

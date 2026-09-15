@@ -16,6 +16,7 @@ const ledgerSchema = z.object({
  adjustments:z.array(z.object({id,month:z.string().regex(/^\d{4}-\d{2}$/),amount:z.number().finite().min(-1_000_000_000).max(1_000_000_000),note:z.string().max(300)})),
  payments:z.array(z.object({id,month:z.string().regex(/^\d{4}-\d{2}$/),date,amount,note:z.string().max(300)})),
  settlements:z.array(z.object({month:z.string().regex(/^\d{4}-\d{2}$/),start:date,end:date,expected:z.number().finite(),payDate:date,lockedAt:z.string()})),
+ reconciliations:z.array(z.object({month:z.string().regex(/^\d{4}-\d{2}$/),expected:z.number().finite(),received:z.number().finite(),difference:z.number().finite(),note:z.string().max(300),confirmedAt:z.string().min(1).max(100)})).default([]),
 });
 export function parseLedger(value:unknown):Ledger {
  const parsed=ledgerSchema.safeParse(value);

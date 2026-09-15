@@ -1,6 +1,6 @@
-# Ca Làm — KFC Web tính lương
+# ShiftTrack — Theo dõi giờ làm và kỳ lương
 
-Ứng dụng tiếng Việt ưu tiên điện thoại, hỗ trợ giao diện sáng/tối ghi nhớ theo thiết bị: ghi ca theo vị trí, tính lương theo ngày áp dụng, đối chiếu lương nhận hàng tháng, tài khoản và quyền chia sẻ chỉ đọc.
+Ứng dụng tiếng Việt ưu tiên điện thoại, hỗ trợ giao diện sáng/tối ghi nhớ theo thiết bị: ghi ca theo vị trí, tính lương theo ngày áp dụng, đối chiếu lương nhận hàng tháng, hồ sơ riêng tư, bạn bè, tin nhắn và nhật ký chung.
 
 ## Công nghệ
 
@@ -24,11 +24,14 @@ Chưa kết nối Supabase: ứng dụng hiển thị rõ chế độ lưu trên
 
 Áp dụng SQL trong `supabase/migrations/` vào một dự án dành riêng cho ứng dụng. Lược đồ gồm:
 
-- `profiles`: tên hiển thị/username có thể tìm kiếm bởi người đã đăng nhập; không chứa email.
+- `profiles`: tên hiển thị/username, ảnh đại diện/bìa và thông tin hồ sơ; không chứa email.
 - `ledgers`: một sổ JSONB có phiên bản cho mỗi chủ sở hữu, gồm vị trí, lịch sử lương, quy tắc, ngày lễ, ca, điều chỉnh, thực nhận, kỳ đã chốt.
-- `ledger_shares`: chủ sổ cấp/thu hồi quyền xem toàn bộ sổ cho người khác; không có quyền sửa.
+- `friendships` và `friend_permissions`: lời mời hai chiều và ba quyền độc lập cho lịch làm, lương dự kiến, lương thực nhận/cài đặt.
+- `direct_messages`, `profile_notes`, `journal_posts`, `journal_images`, `journal_reactions`, `journal_comments`: không gian riêng tư chỉ cho hai bạn bè đã chấp nhận.
 - `save_ledger`: ghi nguyên tử với revision dự kiến để tránh ghi đè từ hai thiết bị.
-- `search_profiles`: tìm tên/username tối thiểu 2 ký tự, tối đa 20 kết quả.
+- `search_profiles`: chỉ trả avatar, tên hiển thị và username an toàn; không trả email.
+
+Áp dụng migration theo thứ tự tên file. Migration `202609140001_ca_lam_2_social.sql` vô hiệu hóa cơ chế `ledger_shares` cũ và **không chuyển đổi tự động** dữ liệu cũ thành bạn bè. Người dùng cần gửi lời mời kết bạn lại. Bucket `social-media` là private, giới hạn ảnh JPEG/PNG/WebP 5 MB và cần bật Realtime cho `direct_messages` (migration đã thêm publication khi Supabase Storage/Realtime có mặt).
 
 Tất cả bảng đều bật RLS và có GRANT tường minh. Chức năng ghi đặc quyền nằm trong schema riêng, kiểm tra `auth.uid()`, chỉ được truy cập qua hàm wrapper có quyền giới hạn. Không sử dụng service-role key ở trình duyệt. Hệ thống là sổ tự theo dõi, không phải hệ thống phê duyệt bảng lương do doanh nghiệp quản lý: chủ tài khoản được sửa sổ của mình.
 
@@ -38,6 +41,27 @@ Thiết lập biến môi trường ở Worker:
 SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
 ```
+
+### Thông báo web
+
+Sau khi áp dụng migration `202609150001_ca_lam_3_notifications.sql`, tạo một **Database Webhook** cho sự kiện `INSERT` của bảng `public.notification_events`. Webhook gọi:
+
+```text
+POST https://YOUR_WORKER/api/push/deliver
+Header: x-ca-lam-webhook-secret: YOUR_WEBHOOK_SECRET
+```
+
+Thiết lập các biến secret sau tại Cloudflare Worker, không đặt chúng trong mã nguồn hay biến public:
+
+```text
+VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_SUBJECT=mailto:admin@YOUR_DOMAIN
+SUPABASE_WEBHOOK_SECRET=
+SUPABASE_SERVICE_ROLE_KEY=
+```
+
+Tạo cặp VAPID bằng `npx web-push generate-vapid-keys`; chỉ `VAPID_PUBLIC_KEY` được endpoint `/api/push/public-key` trả về cho trình duyệt. Chuông trên ứng dụng là nơi người dùng chủ động bật push cho từng thiết bị. Push chỉ được gửi cho hoạt động xã hội; bảng activity và subscription được bảo vệ bằng RLS. Trên iPhone/iPad, Web Push yêu cầu người dùng thêm trang vào Màn hình chính trước khi bật thông báo.
 
 API `/api/config` chỉ trả URL và khóa publishable (hoặc legacy anon); không dùng khóa bí mật. Thêm URL web thật vào Supabase Authentication → URL Configuration, cả Site URL và Redirect URLs. Bật nhà cung cấp email/password. Nếu đăng ký xác nhận email phục vụ nhiều người, cấu hình SMTP phù hợp giới hạn gửi của Supabase; không tự tắt xác nhận email để né giới hạn.
 
