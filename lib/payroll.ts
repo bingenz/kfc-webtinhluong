@@ -420,8 +420,13 @@ export function periodForecast(
     (sum, shift) => sum + shiftAmount(shift, summary.shifts),
     0,
   );
+  const earnedMinutes = earnedShifts.reduce(
+    (sum, shift) => sum + shift.minutes,
+    0,
+  );
   return {
     ...summary,
+    earnedMinutes,
     earnedWages,
     forecastWages,
     earnedExpected: earnedWages + summary.adjustment,

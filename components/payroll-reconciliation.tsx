@@ -172,32 +172,36 @@ export default function PayrollReconciliation({
       </div>
 
       <section className="payroll-hero">
-        <div>
+        <div className="payroll-hero-heading">
           <span className={'payroll-status ' + status}>{statusInfo.label}</span>
           <p>Kỳ công {shortDate(summary.start)} - {shortDate(summary.end)} · Dự kiến nhận {shortDate(summary.payDate)}</p>
         </div>
-        <div className="payroll-hero-amount">
-          <small>CHÊNH LỆCH</small>
-          <strong>{money(summary.difference)}</strong>
-          <span>{summary.difference === 0 && summary.payments.length ? "Đã đủ số tiền dự kiến" : summary.difference < 0 ? "Thiếu so với dự kiến" : "Nhiều hơn dự kiến"}</span>
+        <div className="payroll-hero-stats" aria-label="Tóm tắt kỳ lương">
+          <div>
+            <small>TỔNG DỰ KIẾN</small>
+            <strong>{money(summary.expected)}</strong>
+          </div>
+          <div>
+            <small>ĐÃ NHẬN</small>
+            <strong>{money(summary.received)}</strong>
+          </div>
+          <div>
+            <small>CHÊNH LỆCH</small>
+            <strong>{money(summary.difference)}</strong>
+          </div>
+          <div>
+            <small>THỜI GIAN</small>
+            <strong>{hours(summary.minutes)} giờ</strong>
+          </div>
+          <div>
+            <small>CA LÀM</small>
+            <strong>{summary.shifts.length} ca · {summary.days} ngày</strong>
+          </div>
         </div>
       </section>
 
-      <div className="payroll-stat-grid" aria-label="Tóm tắt kỳ lương">
-        <div><span>Dự kiến</span><strong>{money(summary.expected)}</strong></div>
-        <div><span>Đã nhận</span><strong>{money(summary.received)}</strong></div>
-        <div><span>Thời gian</span><strong>{hours(summary.minutes)}</strong><small>{summary.shifts.length} ca · {summary.days} ngày</small></div>
-      </div>
-
       <div className="payroll-columns">
         <div className="payroll-main-stack">
-          <section className="card card-pad">
-            <div className="section-head"><h2>Chi tiết dự kiến</h2><span className="helper">Tự tính từ ca làm đã lưu</span></div>
-            <div className="breakdown-row"><span>Tiền ca</span><strong>{money(summary.wages)}</strong></div>
-            <div className="breakdown-row"><span>Điều chỉnh</span><strong>{money(summary.adjustment)}</strong></div>
-            <div className="breakdown-row total"><span>Tổng dự kiến</span><strong>{money(summary.expected)}</strong></div>
-          </section>
-
           <section className="card card-pad">
             <div className="section-head"><h2>Khoản đã nhận</h2><span className="helper">{summary.payments.length} lần nhận</span></div>
             {summary.payments.length ? summary.payments.map((item) => (

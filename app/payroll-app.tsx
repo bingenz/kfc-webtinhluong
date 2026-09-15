@@ -31,6 +31,7 @@ import { parseLedger } from "@/lib/ledger-schema";
 import {
   initialLedger,
   defaultPayrollMonth,
+  hours,
   lockedDate,
   makeShift,
   money,
@@ -261,20 +262,22 @@ export default function PayrollApp() {
       setError(errorMessage(e));
     }
   }
-  const row = (shift: Shift) => {
+  const row = (shift: Shift, showDate = true) => {
     const status = shiftStatus(shift, now);
     return (
       <div className="shift-row" key={shift.id}>
-        <div className="shift-date">
-          <strong>{shift.date.slice(8)}</strong>
-          <small>
-            {status === "completed"
-              ? "Đã xong"
-              : status === "today"
-                ? "Hôm nay"
-                : "Sắp tới"}
-          </small>
-        </div>
+        {showDate && (
+          <div className="shift-date">
+            <strong>{shift.date.slice(8)}</strong>
+            <small>
+              {status === "completed"
+                ? "Đã xong"
+                : status === "today"
+                  ? "Hôm nay"
+                  : "Sắp tới"}
+            </small>
+          </div>
+        )}
         <div className="shift-info">
           <p>
             <span
@@ -302,6 +305,9 @@ export default function PayrollApp() {
   const [year, numberMonth] = month.split("-").map(Number),
     days = new Date(Date.UTC(year, numberMonth, 0)).getUTCDate(),
     offset = (new Date(Date.UTC(year, numberMonth - 1, 1)).getUTCDay() + 6) % 7;
+  const monthShifts = ledger.shifts
+    .filter((shift) => shift.date.startsWith(month))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start));
   const calendar = (
     <div className="calendar">
       {["T2", "T3", "T4", "T5", "T6", "T7", "CN"].map((day) => (
@@ -329,23 +335,8 @@ export default function PayrollApp() {
             }
           >
             <span className="day-number">{i + 1}</span>
-            {shifts.slice(0, 2).map((x) => (
-              <span
-                className="calendar-role"
-                style={{ "--role-color": x.color } as React.CSSProperties}
-                key={x.id}
-              >
-                {x.start} {x.roleName}
-              </span>
-            ))}
             {shifts.length > 0 && (
-              <small>
-                {status === "completed"
-                  ? "Đã xong"
-                  : status === "today"
-                    ? "Hôm nay"
-                    : "Sắp tới"}
-              </small>
+              <span className="calendar-count">{shifts.length} ca</span>
             )}
           </button>
         );
@@ -459,12 +450,6 @@ export default function PayrollApp() {
                         : "Không gian riêng tư của bạn"}
               </p>
             </div>
-            {(tab === "overview" || tab === "calendar") && (
-              <button className="btn primary" onClick={() => openShift()}>
-                <Plus size={16} />
-                Thêm ca
-              </button>
-            )}
           </div>
           {error && (
             <p className="error-message" role="alert">
@@ -507,30 +492,45 @@ export default function PayrollApp() {
                     <span>{totals.earnedShifts.length} ca đã hoàn thành</span>
                     <span>{totals.futureShifts.length} ca sắp tới</span>
                   </div>
+                  <div className="summary-stats" aria-label="Tóm tắt kỳ công">
+                    <div>
+                      <Clock3 size={16} />
+                      <small>GIỜ ĐÃ LÀM</small>
+                      <strong>{hours(totals.earnedMinutes)} giờ</strong>
+                    </div>
+                    <div>
+                      <Clock3 size={16} />
+                      <small>TỔNG GIỜ KỲ</small>
+                      <strong>{hours(totals.minutes)} giờ</strong>
+                    </div>
+                    <div>
+                      <CalendarDays size={16} />
+                      <small>CA TRONG KỲ</small>
+                      <strong>{totals.shifts.length} ca</strong>
+                    </div>
+                    <div>
+                      <Wallet size={16} />
+                      <small>TIỀN CA SẮP TỚI</small>
+                      <strong>{money(totals.forecastWages)}</strong>
+                    </div>
+                  </div>
+                  <div className="summary-progress">
+                    <div>
+                      <span>Tiến độ kỳ công</span>
+                      <strong>{totals.earnedShifts.length}/{totals.shifts.length} ca đã kết thúc</strong>
+                    </div>
+                    <div className="bar">
+                      <span
+                        style={{
+                          width:
+                            (totals.shifts.length
+                              ? (totals.earnedShifts.length / totals.shifts.length) * 100
+                              : 0) + "%",
+                        }}
+                      />
+                    </div>
+                  </div>
                 </section>
-                <div className="metrics">
-                  <div className="metric">
-                    <Clock3 size={17} />
-                    <div className="value">
-                      {Math.round(totals.minutes / 6) / 10}
-                      <span>giờ</span>
-                    </div>
-                    <p>Tổng giờ trong kỳ</p>
-                  </div>
-                  <div className="metric">
-                    <CalendarDays size={17} />
-                    <div className="value">
-                      {totals.shifts.length}
-                      <span>ca</span>
-                    </div>
-                    <p>Ca làm trong kỳ</p>
-                  </div>
-                  <div className="metric">
-                    <Wallet size={17} />
-                    <div className="value">{money(totals.forecastWages)}</div>
-                    <p>Tiền ca sắp tới</p>
-                  </div>
-                </div>
                 <section className="card card-pad">
                   <div className="section-head">
                     <h2>Ca hôm nay và sắp tới</h2>
@@ -541,7 +541,7 @@ export default function PayrollApp() {
                       Mở lịch
                     </button>
                   </div>
-                  {totals.futureShifts.slice(0, 5).map(row)}
+                  {totals.futureShifts.slice(0, 5).map((shift) => row(shift))}
                   {!totals.futureShifts.length && (
                     <Blank
                       title="Chưa có ca sắp tới"
@@ -551,25 +551,6 @@ export default function PayrollApp() {
                 </section>
               </div>
               <aside className="right-stack">
-                <section className="card card-pad">
-                  <h2>Tiến độ kỳ công</h2>
-                  <p className="helper mt-3">
-                    {totals.earnedShifts.length}/{totals.shifts.length} ca đã
-                    kết thúc.
-                  </p>
-                  <div className="bar mt-3">
-                    <span
-                      style={{
-                        width:
-                          (totals.shifts.length
-                            ? (totals.earnedShifts.length /
-                                totals.shifts.length) *
-                              100
-                            : 0) + "%",
-                      }}
-                    />
-                  </div>
-                </section>
                 <section className="card card-pad">
                   <h2>Thu nhập theo vị trí</h2>
                   {ledger.roles.map((role) => {
@@ -601,22 +582,29 @@ export default function PayrollApp() {
                   <h2>
                     Lịch làm tháng {numberMonth}/{year}
                   </h2>
-                  <button
-                    className="btn icon"
-                    aria-label="Thêm ca"
-                    onClick={() => openShift(undefined, selected)}
-                  >
-                    <Plus size={16} />
-                  </button>
                 </div>
                 {calendar}
               </section>
               <section className="card card-pad">
-                <h2>Ngày {shortDate(selected)}</h2>
-                {ledger.shifts
-                  .filter((x) => x.date === selected)
-                  .sort((a, b) => a.start.localeCompare(b.start))
-                  .map(row)}
+                <div className="section-head">
+                  <div>
+                    <h2>Ca làm trong tháng</h2>
+                    <p className="helper">Toàn bộ ngày có lịch làm, sắp xếp theo thời gian.</p>
+                  </div>
+                  <span className="chip">{monthShifts.length} ca</span>
+                </div>
+                {monthShifts.length ? (
+                  <div className="monthly-shift-list">
+                    {Array.from(new Set(monthShifts.map((shift) => shift.date))).map((date) => (
+                      <section className="shift-day-group" key={date}>
+                        <h3>{shortDate(date)}/{date.slice(0, 4)}</h3>
+                        {monthShifts.filter((shift) => shift.date === date).map((shift) => row(shift, false))}
+                      </section>
+                    ))}
+                  </div>
+                ) : (
+                  <Blank title="Chưa có ca trong tháng" text="Thêm ca để xây dựng lịch làm của bạn." />
+                )}
               </section>
             </div>
           )}
@@ -680,6 +668,16 @@ export default function PayrollApp() {
           )}{" "}
         </div>
       </main>
+      {(tab === "overview" || tab === "calendar") && (
+        <button
+          className="floating-add"
+          aria-label="Thêm ca"
+          title="Thêm ca"
+          onClick={() => openShift(undefined, tab === "calendar" ? selected : undefined)}
+        >
+          <Plus size={24} />
+        </button>
+      )}
       <Modal
         open={shiftModal}
         onClose={() => setShiftModal(false)}
