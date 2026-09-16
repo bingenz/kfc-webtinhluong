@@ -104,11 +104,12 @@ export default function PayrollSettings({
         const parsedAmount = parseVnd(amount);
         if (!validDate(from) || parsedAmount <= 0 || parsedAmount > 10000000)
           throw new Error("Ngày và mức lương phải hợp lệ; lương lớn hơn 0.");
-        if (data.rates.some((x) => x.roleId === roleId && x.from === from))
-          throw new Error(
-            "Vị trí đã có mức lương bắt đầu ngày này. Hãy chọn ngày áp dụng mới.",
-          );
-        next.rates.push({ id: uid(), roleId, from, amount: parsedAmount });
+        const existingIndex = next.rates.findIndex((x) => x.roleId === roleId && x.from === from);
+        if (existingIndex >= 0) {
+          next.rates[existingIndex].amount = parsedAmount;
+        } else {
+          next.rates.push({ id: uid(), roleId, from, amount: parsedAmount });
+        }
       } else if (modal === "holiday") {
         if (
           !validDate(from) ||
@@ -639,6 +640,26 @@ export default function PayrollSettings({
             </p>
           )}
           <div className="form-footer">
+            {modal === "holiday" && data.holidays.some((x) => x.date === from) && (
+              <button
+                type="button"
+                className="btn icon danger"
+                aria-label="Xóa ngày lễ"
+                onClick={async () => {
+                  try {
+                    await commit({
+                      ...data,
+                      holidays: data.holidays.filter((x) => x.date !== from),
+                    });
+                    setModal("");
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : String(e));
+                  }
+                }}
+              >
+                Xóa
+              </button>
+            )}
             <button type="button" className="btn" onClick={() => setModal("")}>
               Hủy
             </button>
