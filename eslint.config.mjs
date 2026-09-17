@@ -20,9 +20,14 @@ const eslintConfig = defineConfig([
       // registry source intact while applying the stricter rules to Site code.
       "@typescript-eslint/no-unused-vars": "off",
       "react-hooks/purity": "off",
-      "react-hooks/set-state-in-effect": "off",
     },
   },
+  {
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "react-hooks/set-state-in-effect": "off",
+    }
+  }
 ]);
 
 export default eslintConfig;

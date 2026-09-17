@@ -156,8 +156,7 @@ export default function PayrollApp() {
   }, [readLocal]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    const local = readLocal();
+        const local = readLocal();
     if (local) { setLedger(local); setReady(true); }
   }, [readLocal]);
 
@@ -202,22 +201,20 @@ export default function PayrollApp() {
     const controller = new AbortController();
     cloudAbort.current = controller;
     if (!client || !user) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      restoreLocalImmediately();
+            restoreLocalImmediately();
       return () => controller.abort();
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setReady(false); setError(""); setMigration(null);
+        setReady(false); setError(""); setMigration(null);
     void (async () => {
       try {
-        let item = await (client.from("profiles").select("id,username,display_name,created_at,updated_at").eq("id", user.id).maybeSingle() as any).abortSignal(controller.signal);
+        let item = await (client.from("profiles").select("id,username,display_name,created_at,updated_at").eq("id", user.id).maybeSingle() as unknown as { abortSignal: (s: AbortSignal) => any }).abortSignal(controller.signal);
         if (item.error) throw item.error;
         if (!item.data) {
           const created = await (client.from("profiles").insert({
             id: user.id,
             username: "user_" + user.id.replaceAll("-", "").slice(0, 16),
             display_name: String(user.user_metadata?.display_name || "Người dùng").slice(0, 80),
-          }).select("id,username,display_name,created_at,updated_at").single() as any).abortSignal(controller.signal);
+          }).select("id,username,display_name,created_at,updated_at").single() as unknown as { abortSignal: (s: AbortSignal) => any }).abortSignal(controller.signal);
           if (created.error) throw created.error;
           item = created;
         }

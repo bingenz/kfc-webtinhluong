@@ -39,7 +39,7 @@ export type ShareGrant = {
 
 export async function loadLedger(c: SupabaseClient, id: string, signal?: AbortSignal) {
   let query = c.from("ledgers").select("payload,revision").eq("owner_id", id).maybeSingle();
-  if (signal) query = (query as any).abortSignal(signal);
+  if (signal) query = (query as unknown as { abortSignal: (s: AbortSignal) => typeof query }).abortSignal(signal);
   const { data, error } = await query;
   if (error) throw error;
   return data ? { payload: parseLedger(data.payload), revision: Number(data.revision) } : null;
@@ -52,7 +52,7 @@ export async function saveLedger(
   signal?: AbortSignal,
 ) {
   let query = c.rpc("save_ledger", { document: payload, expected_revision: revision });
-  if (signal) query = (query as any).abortSignal(signal);
+  if (signal) query = (query as unknown as { abortSignal: (s: AbortSignal) => typeof query }).abortSignal(signal);
   const { data, error } = await query;
   if (error) {
     if (error.message.includes("REVISION_CONFLICT")) {

@@ -26,10 +26,8 @@ export function TimePicker({ label, value, onChange, disabled }: PickerProps) {
     [draftMinute, setDraftMinute] = useState(minute);
   const minuteInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDraftHour(hour);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDraftMinute(minute);
+        setDraftHour(hour);
+        setDraftMinute(minute);
   }, [hour, minute]);
   const commit = (nextHour: string, nextMinute: string) => {
     if (
