@@ -503,7 +503,7 @@ export default function PayrollApp() {
             {!user && <section className="settings-section"><div className="section-head"><div><h2>Tài khoản</h2><p className="helper">Đăng nhập để đồng bộ dữ liệu.</p></div><span className="chip">Thiết bị</span></div>{authPanel}</section>}
             <section className="settings-section"><div className="section-head"><div><h2>Vị trí, mức lương & quy tắc</h2><p className="helper">Các thay đổi mới không tự ghi đè snapshot của ca lịch sử.</p></div></div><PayrollSettings data={ledger} commit={commit} busy={busy} readOnly={false}/></section>
             <section className="settings-section"><div className="section-head"><div><h2>Dữ liệu & đồng bộ</h2><p className="helper">Dữ liệu thiết bị luôn được giữ riêng khi bạn dùng tài khoản.</p></div></div><section className="card card-pad"><p className="helper">Nguồn hiện tại: <strong>{mode.type === "cloud" ? "Supabase account" : "localStorage thiết bị"}</strong>. Backup tự động được tạo trước thao tác nhập/gộp có thể ghi đè dữ liệu cloud.</p></section></section>
-            {user && <button className="btn danger" style={{ width: '100%', padding: '12px', marginTop: '8px' }} onClick={() => void logout()}><LogOut size={16}/> Đăng xuất</button>}
+            {user && <button className="btn danger" style={{ width: '100%', padding: '12px', marginTop: '8px' }} onClick={() => { if (window.confirm("Bạn có chắc chắn muốn đăng xuất khỏi tài khoản?")) void logout(); }}><LogOut size={16}/> Đăng xuất</button>}
           </div>}
         </div>
       </main>
