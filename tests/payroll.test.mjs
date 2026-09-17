@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {defaultPayrollMonth,initialLedger,makeShift,reconciliationStatus,shiftAmount,period,periodForecast,periodRange,payDate,parseVnd} from '../lib/payroll.ts';
+import {closePeriod,defaultPayrollMonth,differenceLabel,initialLedger,makeShift,recalculatePeriod,reconciliationStatus,removeShift,reopenPeriod,shiftAmount,shiftStatus,period,periodBreakdown,periodForecast,periodRange,payDate,parseVnd} from '../lib/payroll.ts';
 const input=(overrides={})=>({date:'2026-09-09',roleId:'cook',start:'17:30',end:'22:00',note:'',...overrides});
 test('Cook đóng ca thường: 4.5h × 25500 + 15000 = 129750',()=>{const d=initialLedger(),s=makeShift(d,input());assert.equal(s.minutes,270);assert.equal(shiftAmount(s,[s]),129750)});
 test('Lobby cùng giờ không được phụ cấp Cook',()=>{const d=initialLedger(),s=makeShift(d,input({roleId:'lobby'}));assert.equal(shiftAmount(s,[s]),105750)});
@@ -32,4 +32,41 @@ test('Kỳ lương mặc định chọn kỳ gần nhất đã đến ngày tr�
   const d=initialLedger();
   assert.equal(defaultPayrollMonth(d,new Date('2026-10-03T12:00:00.000Z')),'2026-09');
   assert.equal(defaultPayrollMonth(d,new Date('2026-11-05T12:00:00.000Z')),'2026-10');
+});
+
+
+test('Trạng thái ca phân biệt sắp tới, đang làm và đã xong theo giờ Việt Nam',()=>{
+  const d=initialLedger();const s=makeShift(d,input({date:'2026-09-09',start:'08:00',end:'10:00'}));
+  assert.equal(shiftStatus(s,new Date('2026-09-09T00:59:59.000Z')),'upcoming');
+  assert.equal(shiftStatus(s,new Date('2026-09-09T01:00:00.000Z')),'in_progress');
+  assert.equal(shiftStatus(s,new Date('2026-09-09T03:00:00.000Z')),'completed');
+});
+
+test('Chốt kỳ, xóa ca bị guard ở business logic và mở lại cho phép sửa',()=>{
+  let d=initialLedger();const s=makeShift(d,input());d.shifts.push(s);
+  d=closePeriod(d,'2026-09','2026-09-30T17:00:00.000Z');
+  assert.ok(d.settlements.some(x=>x.month==='2026-09'));
+  assert.throws(()=>removeShift(d,s.id),/chốt/);
+  assert.throws(()=>makeShift(d,{...input(),id:s.id,note:'edit'},s),/đã chốt/);
+  d=reopenPeriod(d,'2026-09');
+  assert.equal(d.settlements.some(x=>x.month==='2026-09'),false);
+  assert.doesNotThrow(()=>removeShift(d,s.id));
+});
+
+test('Tính lại kỳ chỉ khi mở và không thay snapshot ca lịch sử',()=>{
+  let d=initialLedger();const s=makeShift(d,input());d.shifts.push(s);d.rates.push({id:'new',roleId:'cook',from:'2026-09-01',amount:99999});
+  const before=d.shifts[0].rate;d=recalculatePeriod(d,'2026-09');assert.equal(d.shifts[0].rate,before);
+  d=closePeriod(d,'2026-09');assert.throws(()=>recalculatePeriod(d,'2026-09'),/đã chốt/);
+});
+
+test('Đã tích lũy không cộng adjustment chưa có effective date; dự kiến vẫn cộng',()=>{
+  const d=initialLedger();const s=makeShift(d,input({date:'2026-09-09',start:'08:00',end:'10:00'}));d.shifts.push(s);d.adjustments.push({id:'a',month:'2026-09',amount:25000,note:'Thưởng kỳ'});
+  const f=periodForecast(d,'2026-09',new Date('2026-09-09T03:00:00.000Z'));
+  assert.equal(f.earnedExpected,f.earnedWages);assert.equal(f.forecastExpected,period(d,'2026-09').expected);
+});
+
+test('Breakdown tiền khớp tổng dự kiến và reconciliation dùng Thiếu/Dư/Khớp',()=>{
+  const d=initialLedger();d.shifts.push(makeShift(d,input()));d.adjustments.push({id:'a',month:'2026-09',amount:1000,note:''});
+  const b=periodBreakdown(d,'2026-09');assert.equal(b.hourly+b.closing+b.holiday+b.adjustment,b.expected);
+  assert.equal(differenceLabel(-25000),'Thiếu 25.000 ₫');assert.equal(differenceLabel(25000),'Dư 25.000 ₫');assert.equal(differenceLabel(0),'Khớp hoàn toàn');
 });

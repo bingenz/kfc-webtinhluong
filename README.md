@@ -1,123 +1,131 @@
 # ShiftTrack — Theo dõi giờ làm và kỳ lương
 
-Ứng dụng tiếng Việt ưu tiên điện thoại, hỗ trợ giao diện sáng/tối ghi nhớ theo thiết bị: ghi ca theo vị trí, tính lương theo ngày áp dụng, đối chiếu lương nhận hàng tháng, hồ sơ riêng tư, bạn bè, tin nhắn và nhật ký chung.
+ShiftTrack là ứng dụng tiếng Việt ưu tiên điện thoại để ghi ca, tính lương theo rule/rate có hiệu lực, chốt/đối soát kỳ lương và đồng bộ một sổ riêng tư với Supabase. Ứng dụng không còn Friends, Chat, Nhật ký/Feed hay trang Profile xã hội. Tính năng cộng tác duy nhất là **Chia sẻ**: người dùng đăng nhập có thể đưa mã riêng cho người dùng khác để cấp quyền xem toàn bộ lịch làm và sổ lương ở chế độ **read-only**.
 
 ## Công nghệ
 
-- React 19 + TypeScript, Vinext/Vite và các thành phần giao diện Radix.
+- React 19 + TypeScript, Vinext/Vite và các thành phần Radix/shadcn.
 - Supabase Auth + PostgreSQL + RLS.
-- Cloudflare Workers phục vụ giao diện và API cấu hình công khai.
-- GitHub lưu mã nguồn; có quy trình kiểm tra tự động.
+- Cloudflare Workers phục vụ frontend và API `/api/config` chỉ công bố cấu hình Supabase public.
+- npm + `package-lock.json`; Node.js 22.13 trở lên.
 
 ## Chạy ở máy cá nhân
-
-Yêu cầu Node.js 22.13 trở lên và npm.
 
 ```bash
 npm ci
 npm run dev
 ```
 
-Chưa kết nối Supabase: ứng dụng hiển thị rõ chế độ lưu trên thiết bị. Không có dữ liệu mẫu hoặc đăng nhập giả. Sau khi đăng nhập, sổ trên thiết bị không tự chuyển sang tài khoản; người dùng phải chủ động chọn chuyển dữ liệu khi tài khoản chưa có sổ.
+Không có Supabase config, ứng dụng vẫn dùng **local mode** bằng `localStorage`. Không commit `.env`, service-role key, Cloudflare token hoặc credential vào repository.
 
-## Supabase
+## Data lifecycle: thiết bị và tài khoản
 
-Áp dụng SQL trong `supabase/migrations/` vào một dự án dành riêng cho ứng dụng. Lược đồ gồm:
+Ứng dụng luôn biết sổ hiện tại đến từ đâu: `local`, `cloud`, `shared` hoặc trạng thái chuyển tiếp. Khi logout, request cloud đang chạy bị hủy/đánh dấu stale, state account bị bỏ và giao diện lập tức nạp lại sổ local của thiết bị. Vì vậy cloud ledger không thể vô tình bị ghi vào `localStorage` sau logout.
 
-- `profiles`: tên hiển thị/username, ảnh đại diện/bìa và thông tin hồ sơ; không chứa email.
-- `ledgers`: một sổ JSONB có phiên bản cho mỗi chủ sở hữu, gồm vị trí, lịch sử lương, quy tắc, ngày lễ, ca, điều chỉnh, thực nhận, kỳ đã chốt.
-- `friendships` và `friend_permissions`: lời mời hai chiều và ba quyền độc lập cho lịch làm, lương dự kiến, lương thực nhận/cài đặt.
-- `direct_messages`, `profile_notes`, `journal_posts`, `journal_images`, `journal_reactions`, `journal_comments`: không gian riêng tư chỉ cho hai bạn bè đã chấp nhận.
-- `save_ledger`: ghi nguyên tử với revision dự kiến để tránh ghi đè từ hai thiết bị.
-- `search_profiles`: chỉ trả avatar, tên hiển thị và username an toàn; không trả email.
+Khi login:
 
-Áp dụng migration theo thứ tự tên file. Migration `202609140001_ca_lam_2_social.sql` vô hiệu hóa cơ chế `ledger_shares` cũ và **không chuyển đổi tự động** dữ liệu cũ thành bạn bè. Người dùng cần gửi lời mời kết bạn lại. Bucket `social-media` là private, giới hạn ảnh JPEG/PNG/WebP 5 MB và cần bật Realtime cho `direct_messages` (migration đã thêm publication khi Supabase Storage/Realtime có mặt).
+- Cloud trống + thiết bị có dữ liệu: chọn **Chuyển dữ liệu thiết bị lên tài khoản** hoặc **Bắt đầu tài khoản mới**. Bắt đầu mới không xóa local ledger.
+- Local và cloud đều có dữ liệu: chọn dùng cloud, dùng thiết bị, hoặc **Gộp**. Merge chỉ thêm record khác ID; cùng ID nhưng nội dung khác bị báo conflict thay vì silent overwrite.
+- Trước thao tác có thể overwrite, app lưu backup local có timestamp.
+- JSON local bị hỏng không bị tự xóa. Recovery UI cho phép thử lại, tải raw JSON lỗi, phục hồi backup hoặc reset thiết bị sau confirmation.
 
-Tất cả bảng đều bật RLS và có GRANT tường minh. Chức năng ghi đặc quyền nằm trong schema riêng, kiểm tra `auth.uid()`, chỉ được truy cập qua hàm wrapper có quyền giới hạn. Không sử dụng service-role key ở trình duyệt. Hệ thống là sổ tự theo dõi, không phải hệ thống phê duyệt bảng lương do doanh nghiệp quản lý: chủ tài khoản được sửa sổ của mình.
+## Supabase và migration
 
-Thiết lập biến môi trường ở Worker:
+Áp dụng migration theo đúng thứ tự filename trong `supabase/migrations/`. Migration hiện tại cuối cùng là:
+
+```text
+202609160001_shifttrack_sharing_cleanup.sql
+```
+
+Migration này:
+
+- không rewrite `public.ledgers`;
+- ghi nhận số ledger và số phần tử shifts/rates/settlements/adjustments/payments trước cleanup, rồi abort transaction nếu các count lõi thay đổi;
+- xóa runtime objects của Friends/Chat/Journal/Profile social/notifications và bucket `social-media` khi Storage tồn tại;
+- giữ `profiles` ở dạng identity tối thiểu cho auth/ownership;
+- tạo `share_identities`, `share_grants`, rate-limit log và RPC cho ensure/rotate/redeem/revoke;
+- đổi RLS `ledgers` để owner đọc sổ mình, viewer chỉ `SELECT` khi có active grant;
+- không cấp cho viewer đường mutation ledger của owner. `save_ledger` vẫn luôn scope write vào `auth.uid()`.
+
+**Production safety:** trước khi áp dụng migration cleanup trên production, tạo Supabase backup/snapshot. Sau migration, đối chiếu row counts của ledger/shifts/rates/settlements/adjustments/payments và owner mapping. Nếu count giảm bất ngờ, rollback/restore snapshot và điều tra; không tiếp tục deploy.
+
+## Chia sẻ read-only
+
+Trong tab **Chia sẻ**:
+
+1. Mỗi account có mã dạng `ST-XXXX-XXXX-XXXX-XXXX`, không dùng email hay raw auth UUID.
+2. Người nhận phải đăng nhập rồi nhập mã để redeem; anonymous không thể dùng mã đọc payroll.
+3. Grant cho phép xem toàn bộ lịch sử ledger của owner, gồm lịch làm, snapshot rate/rule, adjustments, payments, reconciliation và settlements.
+4. Viewer không thể tạo/sửa/xóa ca, chỉnh lương, đối soát, chốt/mở kỳ, sửa settings hoặc cấp quyền thay owner. UI ẩn mutation và RLS/API vẫn chặn gọi trực tiếp.
+5. Owner có thể revoke ngay. Trang shared revalidate quyền và không tiếp tục hiển thị cached owner ledger như đang authorized.
+6. Rotate mã làm mã cũ hết hiệu lực nhưng không tự revoke grant đang tồn tại.
+
+Mã plaintext chỉ được trả về cho chính owner qua RPC để có thể copy; lookup dùng code đã normalize + hash, và bảng identity không được grant trực tiếp cho client. Redeem có rate limit theo account và lỗi mã sai không expose email/UUID owner.
+
+## Kỳ lương và locking
+
+- Kỳ có thể **Chốt**, **Mở lại** và **Tính lại** khi còn mở.
+- Chốt kỳ lưu settlement snapshot và khóa mọi ca trong phạm vi. Guard nằm trong business logic, không chỉ ở disabled button.
+- Mở lại cần confirmation trước khi mutation trở lại khả dụng.
+- `Đã tích lũy` chỉ tính ca đã kết thúc; adjustment của kỳ không bị coi là đã earned khi không có effective date. `Dự kiến` gồm ca còn lại + adjustment.
+- Breakdown hiển thị lương theo giờ, phụ cấp đóng ca, phần tăng do ngày lễ, điều chỉnh và tổng dự kiến.
+- Đối soát dùng nhãn `Thiếu`, `Dư` hoặc `Khớp hoàn toàn`.
+
+## Quy tắc nghiệp vụ chính
+
+- Mỗi ca có ngày, vị trí, giờ vào/ra, phút làm và snapshot rate/rule tại thời điểm tạo.
+- Ca không qua đêm và không trùng giờ; hai ca liền nhau được phép.
+- Vị trí active nhưng chưa có wage rate bị cảnh báo trước và không thể lưu ca.
+- Rate/rule mới không tự tính lại ca lịch sử đã có snapshot.
+- Trạng thái ca là `Sắp tới`, `Đang làm`, `Đã xong` theo timezone `Asia/Ho_Chi_Minh`.
+- Kỳ chốt khóa edit/delete ở cả UI và helper nghiệp vụ.
+
+## Cấu hình Worker
+
+Chỉ dùng public/publishable Supabase values:
 
 ```text
 SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
 ```
 
-### Thông báo web
+`/api/config` từ chối `sb_secret_...` và JWT không có role `anon`. Không cần VAPID, webhook notification hay service-role key cho frontend của phiên bản này.
 
-Sau khi áp dụng migration `202609150001_ca_lam_3_notifications.sql`, tạo một **Database Webhook** cho sự kiện `INSERT` của bảng `public.notification_events`. Webhook gọi:
+## Verification và CI parity
 
-```text
-POST https://YOUR_WORKER/api/push/deliver
-Header: x-ca-lam-webhook-secret: YOUR_WEBHOOK_SECRET
-```
-
-Thiết lập các biến secret sau tại Cloudflare Worker, không đặt chúng trong mã nguồn hay biến public:
-
-```text
-VAPID_PUBLIC_KEY=
-VAPID_PRIVATE_KEY=
-VAPID_SUBJECT=mailto:admin@YOUR_DOMAIN
-SUPABASE_WEBHOOK_SECRET=
-SUPABASE_SERVICE_ROLE_KEY=
-```
-
-Tạo cặp VAPID bằng `npx web-push generate-vapid-keys`; chỉ `VAPID_PUBLIC_KEY` được endpoint `/api/push/public-key` trả về cho trình duyệt. Chuông trên ứng dụng là nơi người dùng chủ động bật push cho từng thiết bị. Push chỉ được gửi cho hoạt động xã hội; bảng activity và subscription được bảo vệ bằng RLS. Trên iPhone/iPad, Web Push yêu cầu người dùng thêm trang vào Màn hình chính trước khi bật thông báo.
-
-API `/api/config` chỉ trả URL và khóa publishable (hoặc legacy anon); không dùng khóa bí mật. Thêm URL web thật vào Supabase Authentication → URL Configuration, cả Site URL và Redirect URLs. Bật nhà cung cấp email/password. Nếu đăng ký xác nhận email phục vụ nhiều người, cấu hình SMTP phù hợp giới hạn gửi của Supabase; không tự tắt xác nhận email để né giới hạn.
-
-## Triển khai Cloudflare từ GitHub
-
-Dùng **Cloudflare Workers**, vì bản này có API `/api/config` và build Worker sẵn.
-
-1. Tạo Worker kết nối repository này trong Workers & Pages.
-2. Lệnh build: `npm run build`.
-3. Lệnh deploy: `npx wrangler deploy --config dist/server/wrangler.json --keep-vars`.
-4. Thêm hai biến Supabase ở phần Settings → Variables and Secrets của Worker. Dùng giá trị publishable, không dùng service-role.
-5. Thêm tên miền Worker vào danh sách redirect của Supabase Auth rồi kiểm tra đăng ký, xác nhận email và đăng nhập.
-
-Tên Worker mặc định là `ca-lam`, có thể đổi `name` ở `localBindingConfig` trong `vite.config.ts` trước khi triển khai vào tài khoản riêng. Build và mã nguồn đều tương thích với hạ tầng Sites; `.openai/hosting.json` trong bản GitHub không gắn với danh tính Site riêng của phiên xây dựng.
-
-## Triển khai tự động đã chuẩn bị
-
-Workflow `.github/workflows/cloudflare.yml` kiểm tra và triển khai vào Worker `kfc-webtinhluong` khi main thay đổi. Khi chưa có quyền Cloudflare, workflow báo rõ chưa triển khai và không tạo tài nguyên.
-
-Thiết lập một lần tại repository → Settings → Secrets and variables → Actions → Secrets:
-
-- `CLOUDFLARE_API_TOKEN`: token theo mẫu **Edit Cloudflare Workers**, giới hạn đúng tài khoản triển khai.
-- `CLOUDFLARE_ACCOUNT_ID`: Account ID của tài khoản đó.
-
-Sau đó mở Actions → **Triển khai Cloudflare** → **Run workflow** trên main. Lần cập nhật tiếp theo sẽ tự triển khai nếu kiểm tra đạt. Không bật thêm gói trả phí. URL Worker xuất hiện trong log triển khai. Cuối cùng thêm URL này vào Supabase Auth → URL Configuration để email xác nhận/khôi phục quay lại đúng web.
-
-`deployment/supabase-public.json` đã chứa URL và **publishable key công khai** của dự án dành cho ứng dụng; quyền dữ liệu vẫn do Supabase Auth và RLS kiểm soát. Không đặt secret/service-role key vào file này. Có thể thay dự án bằng Actions variables `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`; tên Worker có thể đổi bằng `CLOUDFLARE_WORKER_NAME`. Token Cloudflare chỉ được lưu trong Actions secrets, không đưa vào mã nguồn hoặc tin nhắn.
-
-Tham khảo: [Cloudflare GitHub Actions](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/).
-
-## Quy tắc nghiệp vụ
-
-- Mỗi ca có ngày, vị trí, giờ vào/ra, phút làm, đơn giá và các hệ số đã lưu tại thời điểm nhập.
-- Ca không qua đêm và không trùng giờ. Hai ca liền nhau được phép.
-- Cook khởi tạo 25.500đ/h, Lobby 23.500đ/h theo thông tin yêu cầu; Cash chưa có lương, phải cấu hình trước khi nhập.
-- Cook kết thúc đúng 22:00 được phụ cấp 15.000đ tối đa một lần/ngày. Vị trí, giờ kết thúc và số tiền được cấu hình theo ngày áp dụng.
-- Hệ số ngày lễ được nhập theo chính sách thực tế, không tự suy đoán theo luật. Mặc định nhân cả phụ cấp; có thể tắt trong Cài đặt.
-- Đơn giá/rule mới không tự thay ca cũ. Chỉ sửa ghi chú giữ snapshot; sửa giờ/ngày/vị trí tính lại. “Tính lại kỳ” yêu cầu xác nhận và chỉ áp dụng kỳ chưa chốt.
-- Làm tròn một lần ở tổng từng ca, cộng các ca vào ngày/tháng. Đơn vị và hướng làm tròn có cấu hình.
-- Kỳ mặc định hết tháng, nhận ngày 5 tháng sau. Có thể đổi ngày chốt và ngày nhận; khi thay ngày chốt, đầu kỳ nối tiếp cuối kỳ trước để không lặp/mất ngày.
-- Kỳ đã chốt lưu tổng dự kiến, khoảng công và ngày nhận; muốn sửa ca hoặc khoản điều chỉnh phải mở lại.
-- Thực nhận có thể gồm nhiều lần và thuộc kỳ lương được chọn, không phụ thuộc tháng chuyển khoản.
-
-## Kiểm tra
+CI hiện chạy:
 
 ```bash
+npm ci
 npm test
-npx tsc --noEmit
+npm run typecheck
 npm run build
 ```
 
-Bộ kiểm tra gồm nghiệp vụ lương và kiểm tra PostgreSQL bằng PGlite với ba người dùng: chỉ chủ được ghi, chia sẻ chỉ đọc, thu hồi quyền, chống ghi đè revision và chặn anonymous. Các kiểm tra PostgreSQL cục bộ không thay thế xác minh Supabase đang triển khai; cần chạy advisors và kiểm tra đăng nhập/chia sẻ trên dự án thật sau khi kết nối.
+Có thể chạy thêm:
 
-## Giới hạn hiện tại
+```bash
+npm run lint
+npm audit
+```
 
-- Chưa hỗ trợ ca qua đêm theo phạm vi đã thống nhất.
-- Tìm kiếm người dùng và đồng bộ cần kết nối mạng.
-- Dữ liệu trên thiết bị phụ thuộc trình duyệt; nên chuyển vào tài khoản sau khi đã kết nối.
-- Sổ lưu dưới dạng JSONB nguyên tử, giới hạn 5 MB/sổ. Khi quy mô lớn hơn, chuyển ca và kỳ lương sang các bảng riêng.
+`npm test` gồm regression payroll/data-lifecycle và PostgreSQL security/schema bằng PGlite: migration cleanup phải giữ nguyên core counts; mã share sai/self bị chặn; A cấp quyền B; B đọc được full ledger nhưng không mutation; C/anonymous không đọc; duplicate redeem không nhân grant; rotate/revoke có hiệu lực đúng; social tables biến mất.
+
+PGlite kiểm tra migration/RLS cục bộ nhưng không thay thế verification production. Sau khi áp dụng migration vào Supabase thật, kiểm tra Auth/RLS và row counts bằng credential quản trị trong môi trường production; không đưa credential vào chat/source.
+
+## Triển khai Cloudflare
+
+Workflow `.github/workflows/cloudflare.yml` chỉ deploy khi repository có `CLOUDFLARE_API_TOKEN` và `CLOUDFLARE_ACCOUNT_ID`. Trước deploy workflow chạy cùng test/typecheck/build như CI. Build thủ công:
+
+```bash
+npm run build
+npx wrangler deploy --config dist/server/wrangler.json --keep-vars
+```
+
+Thêm domain Worker vào Supabase Authentication → URL Configuration. Không tự chạy destructive DB migration trong pipeline deploy nếu chưa có backup/verification step dành riêng cho database.
+
+## Giới hạn kiến trúc
+
+- Ledger vẫn là JSONB nguyên tử, `save_ledger` chặn payload lớn hơn khoảng 5 MB. Khi dữ liệu tiến gần giới hạn này nên tách shifts/payroll history thành bảng riêng thay vì tăng giới hạn im lặng.
+- Chưa hỗ trợ ca qua đêm.
+- Shared view cần mạng và session đăng nhập; không có public share link.

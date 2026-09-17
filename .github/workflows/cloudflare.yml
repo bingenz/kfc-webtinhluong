@@ -42,6 +42,7 @@ jobs:
         run: |
           npm ci
           npm test
-          npx tsc --noEmit
+          npm run lint
+          npm run typecheck
           npm run build
           node scripts/deploy-cloudflare.mjs

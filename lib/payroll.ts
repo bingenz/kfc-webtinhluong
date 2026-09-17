@@ -209,6 +209,14 @@ export function shiftAmount(s: Shift, all: Shift[]) {
 export function lockedDate(d: Ledger, date: string) {
   return d.settlements.some((x) => date >= x.start && date <= x.end);
 }
+
+export function removeShift(d: Ledger, shiftId: string): Ledger {
+  const shift = d.shifts.find((item) => item.id === shiftId);
+  if (!shift) return d;
+  if (lockedDate(d, shift.date))
+    throw new Error("Kỳ lương này đã được chốt. Mở lại kỳ trước khi xóa ca.");
+  return { ...d, shifts: d.shifts.filter((item) => item.id !== shiftId) };
+}
 export function makeShift(
   d: Ledger,
   input: {
@@ -347,6 +355,63 @@ export function period(d: Ledger, month: string) {
   };
 }
 
+export function closePeriod(d: Ledger, month: string, lockedAt = new Date().toISOString()): Ledger {
+  if (d.settlements.some((item) => item.month === month)) return d;
+  const summary = period(d, month);
+  return {
+    ...d,
+    settlements: [
+      ...d.settlements,
+      {
+        month,
+        start: summary.start,
+        end: summary.end,
+        expected: summary.expected,
+        payDate: summary.payDate,
+        lockedAt,
+      },
+    ],
+  };
+}
+
+export function reopenPeriod(d: Ledger, month: string): Ledger {
+  return { ...d, settlements: d.settlements.filter((item) => item.month !== month) };
+}
+
+export function recalculatePeriod(d: Ledger, month: string): Ledger {
+  if (d.settlements.some((item) => item.month === month))
+    throw new Error("Kỳ lương đã chốt. Hãy mở lại kỳ trước khi tính lại.");
+  // Period totals are derived on read. Recalculation deliberately preserves every
+  // shift snapshot (rate/rule/holiday/rounding) so historical work is never
+  // rewritten using today's configuration. Calling period also validates the
+  // current period boundaries before a fresh ledger revision is committed.
+  period(d, month);
+  return { ...d };
+}
+
+export function periodBreakdown(d: Ledger, month: string) {
+  const summary = period(d, month);
+  let hourly = 0;
+  let closing = 0;
+  let holiday = 0;
+  for (const shift of summary.shifts) {
+    const base = (shift.minutes * shift.rate) / 60;
+    const bonus = shiftBonus(shift, summary.shifts) / Math.max(shift.closingMultiplier, 1);
+    const baseRounded = rounded(base, shift.rounding, shift.roundMode);
+    const withBonus = rounded(base + bonus, shift.rounding, shift.roundMode);
+    const actual = shiftAmount(shift, summary.shifts);
+    hourly += baseRounded;
+    closing += withBonus - baseRounded;
+    holiday += actual - withBonus;
+  }
+  return { hourly, closing, holiday, adjustment: summary.adjustment, expected: summary.expected };
+}
+
+export function differenceLabel(value: number) {
+  if (value === 0) return "Khớp hoàn toàn";
+  return value < 0 ? `Thiếu ${money(Math.abs(value))}` : `Dư ${money(value)}`;
+}
+
 export type ReconciliationStatus =
   | "pending"
   | "reviewing"
@@ -379,18 +444,25 @@ export function defaultPayrollMonth(d: Ledger, now: Date = new Date()) {
   return new Date(Date.UTC(year, month - 2, 1)).toISOString().slice(0, 7);
 }
 
-export function shiftEndsAt(shift: Pick<Shift, "date" | "end">): Date {
-  const [year, month, day] = shift.date.split("-").map(Number);
-  const [hour, minute] = shift.end.split(":").map(Number);
-  // This timestamp is constructed as Asia/Ho_Chi_Minh (+07:00), not the device timezone.
+function shiftMoment(date: string, time: string): Date {
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  // Construct as Asia/Ho_Chi_Minh (+07:00), independent of device timezone.
   return new Date(Date.UTC(year, month - 1, day, hour - 7, minute));
 }
+export function shiftStartsAt(shift: Pick<Shift, "date" | "start">): Date {
+  return shiftMoment(shift.date, shift.start);
+}
+export function shiftEndsAt(shift: Pick<Shift, "date" | "end">): Date {
+  return shiftMoment(shift.date, shift.end);
+}
 export function shiftStatus(
-  shift: Pick<Shift, "date" | "end">,
+  shift: Pick<Shift, "date" | "start" | "end">,
   now: Date = new Date(),
-): "completed" | "today" | "future" {
+): "upcoming" | "in_progress" | "completed" {
   if (now >= shiftEndsAt(shift)) return "completed";
-  return shift.date === todayAt(now) ? "today" : "future";
+  if (now >= shiftStartsAt(shift)) return "in_progress";
+  return "upcoming";
 }
 export function todayAt(now: Date) {
   return new Intl.DateTimeFormat("en-CA", {
@@ -429,7 +501,7 @@ export function periodForecast(
     earnedMinutes,
     earnedWages,
     forecastWages,
-    earnedExpected: earnedWages + summary.adjustment,
+    earnedExpected: earnedWages,
     forecastExpected: earnedWages + forecastWages + summary.adjustment,
     earnedShifts,
     futureShifts,

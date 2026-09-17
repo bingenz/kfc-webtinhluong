@@ -14,7 +14,7 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 const managedLinux = readExecutionProfile() === "managed-linux";
 
 const localBindingConfig = {
-  name: "ca-lam",
+  name: "kfc-webtinhluong",
   compatibility_date: "2026-05-15",
   main: "vinext/server/fetch-handler",
   compatibility_flags: ["nodejs_compat"],
