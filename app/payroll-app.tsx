@@ -447,9 +447,7 @@ export default function PayrollApp() {
   const selectedRate = applicable(ledger.rates.filter((item) => item.roleId === roleId), date);
   const editingLocked = !!editing && lockedDate(ledger, editing.date);
 
-  const authPanel = user ? (
-    <section className="card card-pad auth-panel"><h2>Tài khoản</h2><p className="helper mt-2">{profile?.display_name || "Người dùng"} · Dữ liệu tài khoản được đồng bộ qua Supabase.</p><button className="btn ghost mt-4" onClick={() => void logout()}><LogOut size={16}/> Đăng xuất</button></section>
-  ) : (
+  const authPanel = user ? null : (
     <section className="card card-pad auth-panel">
       <h2>{signUp ? "Tạo tài khoản" : "Đăng nhập"}</h2>
       {!client && <p className="helper mt-3">Chưa kết nối Supabase. Dữ liệu chỉ lưu trên thiết bị.</p>}
@@ -505,10 +503,10 @@ export default function PayrollApp() {
           {tab === "sharing" && <SharingPanel client={client} user={user} profile={profile} onProfileChange={setProfile} onOpenShared={(ownerId, displayName) => void openShared(ownerId, displayName)}/>} 
 
           {tab === "settings" && !readOnly && <div className="settings-hub">
-            <section className="settings-section"><div className="section-head"><div><h2>Tài khoản</h2><p className="helper">Đăng nhập/đăng xuất và nguồn dữ liệu hiện tại.</p></div><span className="chip">{mode.type === "cloud" ? "Tài khoản" : "Thiết bị"}</span></div>{authPanel}</section>
-            <section className="settings-section"><div className="section-head"><div><h2>Giao diện</h2><p className="helper">Giao diện sáng/tối được ghi nhớ trên thiết bị.</p></div></div><section className="card card-pad"><div className="settings-control-row"><span>Chế độ tối</span><ThemeToggle/></div></section></section>
+            {!user && <section className="settings-section"><div className="section-head"><div><h2>Tài khoản</h2><p className="helper">Đăng nhập để đồng bộ dữ liệu.</p></div><span className="chip">Thiết bị</span></div>{authPanel}</section>}
             <section className="settings-section"><div className="section-head"><div><h2>Vị trí, mức lương & quy tắc</h2><p className="helper">Các thay đổi mới không tự ghi đè snapshot của ca lịch sử.</p></div></div><PayrollSettings data={ledger} commit={commit} busy={busy} readOnly={false}/></section>
             <section className="settings-section"><div className="section-head"><div><h2>Dữ liệu & đồng bộ</h2><p className="helper">Dữ liệu thiết bị luôn được giữ riêng khi bạn dùng tài khoản.</p></div></div><section className="card card-pad"><p className="helper">Nguồn hiện tại: <strong>{mode.type === "cloud" ? "Supabase account" : "localStorage thiết bị"}</strong>. Backup tự động được tạo trước thao tác nhập/gộp có thể ghi đè dữ liệu cloud.</p></section></section>
+            {user && <button className="btn danger" style={{ width: '100%', padding: '12px', marginTop: '8px' }} onClick={() => void logout()}><LogOut size={16}/> Đăng xuất</button>}
           </div>}
         </div>
       </main>
