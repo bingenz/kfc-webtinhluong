@@ -507,3 +507,29 @@ export function periodForecast(
     futureShifts,
   };
 }
+
+/** Automatically locks ended payroll periods. Safe to call repeatedly. */
+export function autoCloseEndedPeriods(d: Ledger, now: Date = new Date()): Ledger {
+  const currentDate = todayAt(now);
+  const candidates = new Set<string>();
+  const add = (month: string) => { if (/^\d{4}-\d{2}$/.test(month)) candidates.add(month); };
+  const addNext = (month: string) => {
+    const [year, value] = month.split("-").map(Number);
+    add(new Date(Date.UTC(year, value, 1)).toISOString().slice(0, 7));
+  };
+  for (const shift of d.shifts) { const month = shift.date.slice(0, 7); add(month); addNext(month); }
+  for (const item of d.adjustments) add(item.month);
+  for (const item of d.payments) add(item.month);
+  for (const item of d.settlements) add(item.month);
+  for (const item of d.reconciliations) add(item.month);
+
+  let next = d;
+  for (const month of [...candidates].sort()) {
+    if (next.settlements.some((item) => item.month === month)) continue;
+    const summary = period(next, month);
+    if (summary.end < currentDate && (summary.shifts.length > 0 || summary.adjustment !== 0 || summary.payments.length > 0)) {
+      next = closePeriod(next, month, `${currentDate}T00:00:00+07:00`);
+    }
+  }
+  return next;
+}

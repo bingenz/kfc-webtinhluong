@@ -30,6 +30,7 @@ import { errorMessage } from "@/lib/errors";
 import { monthAfterShiftSave, moveMonth } from "@/lib/month";
 import {
   applicable,
+  autoCloseEndedPeriods,
   defaultPayrollMonth,
   hours,
   initialLedger,
@@ -252,6 +253,15 @@ export default function PayrollApp() {
     payrollMonthInitialized.current = true;
   }, [ledger, now, ready]);
 
+  useEffect(() => {
+    if (!ready || readOnly || mode.type === "transition" || busy) return;
+    const closed = autoCloseEndedPeriods(ledger, now);
+    if (closed === ledger) return;
+    void commit(closed).catch((reason) => setError(errorMessage(reason)));
+    // Auto-close is idempotent; ledger changes after commit prevent a second write.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, readOnly, mode.type, ledger, now]);
+
   async function commit(next: Ledger) {
     if (!ready) throw new Error("Sổ lương chưa sẵn sàng.");
     const currentMode = modeRef.current;
@@ -468,7 +478,7 @@ export default function PayrollApp() {
         <aside className="desktop-nav">{ownNavigation.map(([id, label, Icon]) => <button className={tab === id ? "active" : ""} onClick={() => setTab(id)} key={id}><Icon size={18}/>{label}</button>)}</aside>
         <div className={`wrap ${(tab === "overview" || tab === "calendar") && !readOnly ? "page--with-fab" : "page--without-fab"}`}>
           {readOnly && <div className="shared-view-banner"><div><Eye size={17}/><span>Đang xem dữ liệu của <strong>{mode.displayName}</strong></span><span className="readonly-badge">READ ONLY</span></div><button className="btn" onClick={returnToOwnData}>Quay lại dữ liệu của tôi</button></div>}
-          <div className="page-head"><div><h1>{title}</h1><p>{tab === "overview" ? `Kỳ công ${shortDate(totals.start)} - ${shortDate(totals.end)}` : tab === "calendar" ? "Lịch làm theo tháng" : tab === "payroll" ? "Sổ lương, đối soát và lịch sử kỳ" : tab === "sharing" ? "Quản lý quyền xem read-only bằng mã" : "Cài đặt lương, dữ liệu và tài khoản"}</p></div></div>
+          <div className="page-head"><div><h1>{title}</h1><p>{tab === "overview" ? `Kỳ công ${shortDate(totals.start)} - ${shortDate(totals.end)}` : tab === "calendar" ? "Lịch làm theo tháng" : tab === "payroll" ? "Xem nhanh lương và lịch sử theo tháng" : tab === "sharing" ? "Quản lý quyền xem read-only bằng mã" : "Cài đặt lương, dữ liệu và tài khoản"}</p></div></div>
           {error && <p className="error-message" role="alert">{error}</p>}
           <nav className="navtabs">{ownNavigation.map(([id, label, Icon]) => <button key={id} className={`navtab ${tab === id ? "active" : ""}`} onClick={() => setTab(id)}><Icon size={17}/>{label}</button>)}</nav>
 
