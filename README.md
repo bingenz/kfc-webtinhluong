@@ -93,7 +93,9 @@ SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
 
 ## Verification và CI parity
 
-CI hiện chạy:
+CI chạy test, lint, typecheck và build cho mọi pull request/push vào `main`. Mỗi deployment production dùng cùng các kiểm tra này trước khi đưa Worker lên Cloudflare.
+
+## Kiểm tra
 
 ```bash
 npm ci
@@ -113,9 +115,18 @@ npm audit
 
 PGlite kiểm tra migration/RLS cục bộ nhưng không thay thế verification production. Sau khi áp dụng migration vào Supabase thật, kiểm tra Auth/RLS và row counts bằng credential quản trị trong môi trường production; không đưa credential vào chat/source.
 
-## Triển khai Cloudflare
+## Triển khai Cloudflare tự động từ GitHub
 
-Workflow `.github/workflows/cloudflare.yml` chỉ deploy khi repository có `CLOUDFLARE_API_TOKEN` và `CLOUDFLARE_ACCOUNT_ID`. Trước deploy workflow chạy cùng test/typecheck/build như CI. Build thủ công:
+Ứng dụng chạy trên Cloudflare Worker `kfc-webtinhluong`; nguồn chính thức là GitHub, không deploy trực tiếp từ máy cá nhân. Workflow `.github/workflows/check.yml` có hai job tuần tự: `verify` chạy test/lint/typecheck/build cho mọi PR và push vào `main`; `Deploy production` chỉ chạy sau `verify` thành công trên `main`. Các deployment được xếp hàng để không bỏ qua commit đã merge, và không tạo preview cho PR.
+
+Thiết lập một lần tại repository → Settings → Secrets and variables → Actions → Secrets:
+
+- `CLOUDFLARE_API_TOKEN`: token **Edit Cloudflare Workers** giới hạn đúng tài khoản triển khai.
+- `CLOUDFLARE_ACCOUNT_ID`: Account ID của tài khoản đó.
+
+`main` yêu cầu pull request và status check `CI & Deploy Cloudflare / verify`; không cần reviewer thủ công. Merge PR sẽ tự deploy nếu toàn bộ kiểm tra đạt. Chọn **Run workflow** trên `main` để redeploy một commit khi cần. Không đưa token hay secret vào source.
+
+Build thủ công:
 
 ```bash
 npm run build
