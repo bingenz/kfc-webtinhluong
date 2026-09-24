@@ -24,6 +24,7 @@ import { Blank, Choose, Field, Modal } from "@/components/payroll-ui";
 import PayrollSettings from "@/components/payroll-settings";
 import PayrollReconciliation from "@/components/payroll-reconciliation";
 import SharingPanel from "@/components/sharing-panel";
+import ScheduleWorkspace from "@/components/schedule-workspace";
 import { cloudClient, loadLedger, saveLedger, type Profile } from "@/lib/cloud";
 import { BACKUP_PREFIX, LOCAL_KEY, backupKey, hasUserData, mergeLedgers, readDeviceRaw } from "@/lib/data-lifecycle";
 import { errorMessage } from "@/lib/errors";
@@ -90,6 +91,7 @@ export default function PayrollApp() {
   const [month, setMonth] = useState(today().slice(0, 7));
   const [payrollMonth, setPayrollMonth] = useState(today().slice(0, 7));
   const [selected, setSelected] = useState(today());
+  const [calendarView, setCalendarView] = useState<"work" | "study" | "free">("work");
   const [now, setNow] = useState(new Date());
   const [client, setClient] = useState<SupabaseClient | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -340,7 +342,7 @@ export default function PayrollApp() {
       if (modeRef.current.type === "cloud") ownCloudRef.current = { ledger, revision: revision.current };
       const remote = await loadLedger(client, ownerId);
       if (!remote) throw new Error("Quyền xem không còn hiệu lực hoặc dữ liệu không tồn tại.");
-      setLedger(remote.payload); setMode({ type: "shared", ownerId, displayName }); setTab("overview");
+      setLedger(remote.payload); setMode({ type: "shared", ownerId, displayName }); setCalendarView("work"); setTab("overview");
       setMonth(today().slice(0, 7)); setPayrollMonth(defaultPayrollMonth(remote.payload));
     } catch (reason) { setError(errorMessage(reason)); }
     finally { setBusy(false); }
@@ -450,7 +452,9 @@ export default function PayrollApp() {
   );
 
   const ownNavigation = readOnly ? navigation.filter(([id]) => id !== "settings") : navigation;
-  const title = ownNavigation.find((item) => item[0] === tab)?.[1] || "Tổng quan";
+  const title = tab === "calendar"
+    ? calendarView === "work" ? "Lịch làm" : calendarView === "study" ? "Lịch học" : "Lịch rảnh"
+    : ownNavigation.find((item) => item[0] === tab)?.[1] || "Tổng quan";
   const selectedRate = applicable(ledger.rates.filter((item) => item.roleId === roleId), date);
   const editingLocked = !!editing && lockedDate(ledger, editing.date);
 
@@ -478,7 +482,7 @@ export default function PayrollApp() {
         <aside className="desktop-nav">{ownNavigation.map(([id, label, Icon]) => <button className={tab === id ? "active" : ""} onClick={() => setTab(id)} key={id}><Icon size={18}/>{label}</button>)}</aside>
         <div className={`wrap ${(tab === "overview" || tab === "calendar") && !readOnly ? "page--with-fab" : "page--without-fab"}`}>
           {readOnly && <div className="shared-view-banner"><div><Eye size={17}/><span>Đang xem dữ liệu của <strong>{mode.displayName}</strong></span><span className="readonly-badge">READ ONLY</span></div><button className="btn" onClick={returnToOwnData}>Quay lại dữ liệu của tôi</button></div>}
-          <div className="page-head"><div><h1>{title}</h1><p>{tab === "overview" ? `Kỳ công ${shortDate(totals.start)} - ${shortDate(totals.end)}` : tab === "calendar" ? "Lịch làm theo tháng" : tab === "payroll" ? "Xem nhanh lương và lịch sử theo tháng" : tab === "sharing" ? "Quản lý quyền xem read-only bằng mã" : "Cài đặt lương, dữ liệu và tài khoản"}</p></div></div>
+          <div className="page-head"><div><h1>{title}</h1><p>{tab === "overview" ? `Kỳ công ${shortDate(totals.start)} - ${shortDate(totals.end)}` : tab === "calendar" ? calendarView === "work" ? "Lịch làm theo tháng" : calendarView === "study" ? "Lịch học theo tháng" : "Tìm thời gian cả nhóm cùng rảnh" : tab === "payroll" ? "Xem nhanh lương và lịch sử theo tháng" : tab === "sharing" ? "Quản lý quyền xem read-only bằng mã" : "Cài đặt lương, dữ liệu và tài khoản"}</p></div></div>
           {error && <p className="error-message" role="alert">{error}</p>}
           <nav className="navtabs">{ownNavigation.map(([id, label, Icon]) => <button key={id} className={`navtab ${tab === id ? "active" : ""}`} onClick={() => setTab(id)}><Icon size={17}/>{label}</button>)}</nav>
 
@@ -499,11 +503,21 @@ export default function PayrollApp() {
             </div>
           </>}
 
-          {tab === "calendar" && <div className="calendar-workspace">
-            <section className="card card-pad calendar-card"><div className="section-head"><h2>Lịch làm tháng {numberMonth}/{year}</h2></div><MonthNavigator month={month} onChange={(value) => { setMonth(value); if (!selected.startsWith(value)) setSelected(value + "-01"); }}/>{calendar}</section>
-            <section className="card card-pad selected-day-panel"><div className="section-head"><div><h2>{selected.startsWith(month) ? `Ngày ${shortDate(selected)}` : "Chi tiết ngày"}</h2><p className="helper">Chọn một ngày trên lịch để xem ca.</p></div>{!readOnly && <button className="btn primary" onClick={() => openShift(undefined, selected)}><Plus size={15}/> Thêm ca</button>}</div>{selectedShifts.length ? selectedShifts.map((shift) => row(shift, false)) : <Blank title="Ngày này chưa có ca" text="Bạn có thể thêm ca mới cho ngày đã chọn."/>}</section>
-            <section className="card card-pad"><div className="section-head"><div><h2>Ca làm trong tháng</h2><p className="helper">Toàn bộ lịch sử trong tháng đang xem.</p></div><span className="chip">{monthShifts.length} ca</span></div>{monthShifts.length ? <div className="monthly-shift-list">{Array.from(new Set(monthShifts.map((shift) => shift.date))).map((day) => <section className="shift-day-group" key={day}><h3>{shortDate(day)}/{day.slice(0, 4)}</h3>{(shiftsByDate.get(day) || []).map((shift) => row(shift, false))}</section>)}</div> : <Blank title="Chưa có ca trong tháng" text="Tháng này chưa có lịch làm."/>}</section>
-          </div>}
+          {tab === "calendar" && <>
+            <div className="schedule-toolbar">
+              <div className="schedule-switch" role="group" aria-label="Loại lịch">
+                <button className={calendarView === "work" ? "active" : ""} onClick={() => setCalendarView("work")}>Lịch làm</button>
+                <button className={calendarView === "study" ? "active" : ""} onClick={() => setCalendarView("study")}>Lịch học</button>
+                {!readOnly && <button className={calendarView === "free" ? "active" : ""} onClick={() => setCalendarView("free")}>Lịch rảnh</button>}
+              </div>
+              <MonthNavigator month={month} onChange={(value) => { setMonth(value); if (!selected.startsWith(value)) setSelected(value + "-01"); }}/>
+            </div>
+            {calendarView === "work" ? <div className="calendar-workspace">
+              <section className="card card-pad calendar-card"><div className="section-head"><h2>Lịch làm tháng {numberMonth}/{year}</h2></div>{calendar}</section>
+              <section className="card card-pad selected-day-panel"><div className="section-head"><div><h2>{selected.startsWith(month) ? `Ngày ${shortDate(selected)}` : "Chi tiết ngày"}</h2><p className="helper">Chọn một ngày trên lịch để xem ca.</p></div>{!readOnly && <button className="btn primary" onClick={() => openShift(undefined, selected)}><Plus size={15}/> Thêm ca</button>}</div>{selectedShifts.length ? selectedShifts.map((shift) => row(shift, false)) : <Blank title="Ngày này chưa có ca" text="Bạn có thể thêm ca mới cho ngày đã chọn."/>}</section>
+              <section className="card card-pad"><div className="section-head"><div><h2>Ca làm trong tháng</h2><p className="helper">Toàn bộ lịch sử trong tháng đang xem.</p></div><span className="chip">{monthShifts.length} ca</span></div>{monthShifts.length ? <div className="monthly-shift-list">{Array.from(new Set(monthShifts.map((shift) => shift.date))).map((day) => <section className="shift-day-group" key={day}><h3>{shortDate(day)}/{day.slice(0, 4)}</h3>{(shiftsByDate.get(day) || []).map((shift) => row(shift, false))}</section>)}</div> : <Blank title="Chưa có ca trong tháng" text="Tháng này chưa có lịch làm."/>}</section>
+            </div> : <ScheduleWorkspace view={calendarView} ledger={ledger} month={month} selected={selected} onSelectedChange={setSelected} commit={commit} busy={busy} readOnly={readOnly} client={client} user={user} profile={profile}/>}
+          </>}
 
           {tab === "payroll" && <PayrollReconciliation key={`${payrollMonth}-${readOnly ? "shared" : "own"}`} data={ledger} month={payrollMonth} onMonthChange={setPayrollMonth} commit={commit} busy={busy} readOnly={readOnly}/>} 
 
@@ -518,7 +532,7 @@ export default function PayrollApp() {
         </div>
       </main>
 
-      {(tab === "overview" || tab === "calendar") && !readOnly && <button className="floating-add" aria-label="Thêm ca" title="Thêm ca" onClick={() => openShift(undefined, tab === "calendar" ? selected : undefined)}><Plus size={24}/></button>}
+      {(tab === "overview" || (tab === "calendar" && calendarView === "work")) && !readOnly && <button className="floating-add" aria-label="Thêm ca" title="Thêm ca" onClick={() => openShift(undefined, tab === "calendar" ? selected : undefined)}><Plus size={24}/></button>}
 
       <Modal open={shiftModal} onClose={() => setShiftModal(false)} title={editing ? (editingLocked ? "Chi tiết ca đã khóa" : "Sửa ca làm") : "Thêm ca làm"} description={editingLocked ? "Kỳ lương đã được chốt. Ca này không thể chỉnh sửa hoặc xóa." : "Nhập ngày, vị trí và giờ làm."}>
         <form className="form-stack" onSubmit={saveShift}>

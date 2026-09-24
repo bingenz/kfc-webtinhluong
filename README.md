@@ -2,6 +2,8 @@
 
 ShiftTrack là ứng dụng tiếng Việt ưu tiên điện thoại để ghi ca, tính lương theo rule/rate có hiệu lực, chốt/đối soát kỳ lương và đồng bộ một sổ riêng tư với Supabase. Ứng dụng không còn Friends, Chat, Nhật ký/Feed hay trang Profile xã hội. Tính năng cộng tác duy nhất là **Chia sẻ**: người dùng đăng nhập có thể đưa mã riêng cho người dùng khác để cấp quyền xem toàn bộ lịch làm và sổ lương ở chế độ **read-only**.
 
+Trang lịch có ba chế độ tách biệt: lịch làm, lịch học và lịch rảnh. Lịch học hỗ trợ buổi đơn hoặc lặp hằng tuần với ngoại lệ từng buổi; dữ liệu này không tham gia tính lương. Lịch rảnh kết hợp ca làm và buổi học của bản thân với tối đa năm chủ sổ đã chia sẻ, rồi hiển thị các khoảng cả nhóm cùng rảnh từ 60 phút trong 07:00–23:00.
+
 ## Công nghệ
 
 - React 19 + TypeScript, Vinext/Vite và các thành phần Radix/shadcn.
@@ -34,10 +36,10 @@ Khi login:
 Áp dụng migration theo đúng thứ tự filename trong `supabase/migrations/`. Migration hiện tại cuối cùng là:
 
 ```text
-202609160001_shifttrack_sharing_cleanup.sql
+202609240001_study_schedules.sql
 ```
 
-Migration này:
+Migration chia sẻ `202609160001_shifttrack_sharing_cleanup.sql`:
 
 - không rewrite `public.ledgers`;
 - ghi nhận số ledger và số phần tử shifts/rates/settlements/adjustments/payments trước cleanup, rồi abort transaction nếu các count lõi thay đổi;
@@ -46,6 +48,8 @@ Migration này:
 - tạo `share_identities`, `share_grants`, rate-limit log và RPC cho ensure/rotate/redeem/revoke;
 - đổi RLS `ledgers` để owner đọc sổ mình, viewer chỉ `SELECT` khi có active grant;
 - không cấp cho viewer đường mutation ledger của owner. `save_ledger` vẫn luôn scope write vào `auth.uid()`.
+
+Migration `202609240001_study_schedules.sql` chỉ mở rộng validation của `save_ledger` cho ledger v2 có `studySchedules`; không rewrite payload hiện có và vẫn chấp nhận ledger v1 trong giai đoạn chuyển tiếp.
 
 **Production safety:** trước khi áp dụng migration cleanup trên production, tạo Supabase backup/snapshot. Sau migration, đối chiếu row counts của ledger/shifts/rates/settlements/adjustments/payments và owner mapping. Nếu count giảm bất ngờ, rollback/restore snapshot và điều tra; không tiếp tục deploy.
 

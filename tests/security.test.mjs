@@ -9,6 +9,7 @@ const migrations = [
   "202609140001_ca_lam_2_social.sql",
   "202609150001_ca_lam_3_notifications.sql",
   "202609160001_shifttrack_sharing_cleanup.sql",
+  "202609240001_study_schedules.sql",
 ];
 
 async function migration(name) {
@@ -75,6 +76,8 @@ test("sharing migration preserves payroll data and enforces read-only grants end
     doc.adjustments.push({id:"adj",month:"2026-09",amount:15000,note:"Thưởng"});
     doc.payments.push({id:"pay",month:"2026-09",date:"2026-10-05",amount:120000,note:"Đợt 1"});
     doc.settlements.push({month:"2026-09",start:"2026-09-01",end:"2026-09-30",expected:144750,payDate:"2026-10-05",lockedAt:"2026-09-30T17:00:00.000Z"});
+    doc.schemaVersion=1;
+    delete doc.studySchedules;
     await asUser(db,a);
     await db.query("select public.save_ledger($1::jsonb,0)",[JSON.stringify(doc)]);
     const before = await coreCounts(db);
@@ -83,6 +86,7 @@ test("sharing migration preserves payroll data and enforces read-only grants end
     await db.exec(await migration(migrations[3]));
     const after = await coreCounts(db);
     assert.deepEqual(after,before,"migration must preserve ledger/history counts");
+    await db.exec(await migration(migrations[4]));
 
     const removed = (await db.query(`select
       to_regclass('public.friendships') as friendships,
@@ -157,6 +161,7 @@ test("ledger save remains owner-scoped with CAS and rejects anonymous writes", a
   try {
     await setupAuth(db);
     await db.exec(await migration(migrations[0]));
+    await db.exec(await migration(migrations[4]));
     const a="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     await db.query("insert into auth.users values($1)",[a]);
     await asUser(db,a);

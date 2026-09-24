@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { Copy, Eye, KeyRound, RefreshCw, ShieldCheck, UserMinus } from "lucide-react";
 import { toast } from "sonner";
@@ -35,10 +35,9 @@ export default function SharingPanel({ client, user, profile, onProfileChange, o
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setDisplayName(profile?.display_name || ""), [profile?.display_name]);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     if (!client || !user) return;
     setBusy(true);
     setError("");
@@ -56,10 +55,9 @@ export default function SharingPanel({ client, user, profile, onProfileChange, o
     } finally {
       setBusy(false);
     }
-  }
+  }, [client, user]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
-  useEffect(() => { void refresh(); }, [client, user?.id]);
+  useEffect(() => { void refresh(); }, [refresh]);
 
   if (!user || !client) {
     return (
