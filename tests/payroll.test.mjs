@@ -17,6 +17,16 @@ test('Kỳ chốt tùy chọn đúng tháng nhuận và giao năm',()=>{assert.d
 test('Thay ngày chốt không lặp/mất ngày giữa hai kỳ',()=>{const d=initialLedger();d.rules.push({...d.rules[0],id:'new',from:'2026-10-01',cutoff:20});assert.equal(period(d,'2026-09').end,'2026-09-30');assert.equal(period(d,'2026-10').start,'2026-10-01');assert.equal(period(d,'2026-10').end,'2026-10-20');assert.equal(period(d,'2026-11').start,'2026-10-21')});
 test('Làm tròn mỗi ca theo cấu hình, phút không bị cắt',()=>{const d=initialLedger();d.rules[0].rounding=100;d.rules[0].roundMode='down';const s=makeShift(d,input({start:'08:00',end:'08:01'}));assert.equal(s.minutes,1);assert.equal(shiftAmount(s,[s]),400)});
 test('Ca chuyển sang đã tích lũy đúng tại giờ kết thúc theo giờ Việt Nam',()=>{const d=initialLedger();const done=makeShift(d,input({date:'2026-09-09',start:'08:00',end:'10:00'}));const later=makeShift(d,input({date:'2026-09-09',start:'11:00',end:'13:00'}));d.shifts.push(done,later);const before=periodForecast(d,'2026-09',new Date('2026-09-09T02:59:59.000Z'));const exact=periodForecast(d,'2026-09',new Date('2026-09-09T03:00:00.000Z'));assert.equal(before.earnedWages,0);assert.equal(before.earnedMinutes,0);assert.equal(exact.earnedWages,shiftAmount(done,d.shifts));assert.equal(exact.earnedMinutes,120);assert.equal(exact.forecastExpected,period(d,'2026-09').expected)});
+test('Ca đang làm và sắp tới xếp ngày gần nhất trước rồi đến giờ bắt đầu',()=>{
+  const d=initialLedger();
+  d.shifts.push(
+    makeShift(d,input({id:'later-day',date:'2026-09-20',start:'08:00',end:'10:00'})),
+    makeShift(d,input({id:'later-time',date:'2026-09-10',start:'13:00',end:'15:00'})),
+    makeShift(d,input({id:'nearest',date:'2026-09-10',start:'08:00',end:'10:00'})),
+  );
+  const forecast=periodForecast(d,'2026-09',new Date('2026-09-01T00:00:00.000Z'));
+  assert.deepEqual(forecast.futureShifts.map(x=>x.id),['nearest','later-time','later-day']);
+});
 test('Parser VND giữ nguyên mọi số nguyên và dấu phân tách',()=>{assert.equal(parseVnd('25500'),25500);assert.equal(parseVnd('23.500'),23500);assert.equal(parseVnd('25,500'),25500);assert.throws(()=>parseVnd('25.50'),/hợp lệ/)});
 test('Kỳ lương xác nhận dùng snapshot và yêu cầu đối soát lại khi dữ liệu đổi',()=>{
   const d=initialLedger();d.shifts.push(makeShift(d,input()));

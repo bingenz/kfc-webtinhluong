@@ -67,8 +67,29 @@ export type Reconciliation = {
   note: string;
   confirmedAt: string;
 };
+export type StudyException =
+  | { date: string; action: "cancel" }
+  | { date: string; action: "replace"; start: string; end: string };
+export type StudySchedule =
+  | {
+      id: string;
+      kind: "single";
+      date: string;
+      start: string;
+      end: string;
+    }
+  | {
+      id: string;
+      kind: "weekly";
+      startDate: string;
+      endDate: string;
+      weekdays: number[];
+      start: string;
+      end: string;
+      exceptions: StudyException[];
+    };
 export type Ledger = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   roles: Role[];
   rates: Rate[];
   rules: Rule[];
@@ -78,6 +99,7 @@ export type Ledger = {
   payments: Payment[];
   settlements: Settlement[];
   reconciliations: Reconciliation[];
+  studySchedules: StudySchedule[];
 };
 export function uid(): string {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -131,7 +153,7 @@ export function formatVndInput(value: number) {
 }
 export function initialLedger(): Ledger {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     roles: [
       { id: "cook", name: "Cook", color: "#e89728", active: true },
       { id: "lobby", name: "Lobby", color: "#4e75e8", active: true },
@@ -166,6 +188,7 @@ export function initialLedger(): Ledger {
     payments: [],
     settlements: [],
     reconciliations: [],
+    studySchedules: [],
   };
 }
 export function applicable<T extends { from: string }>(
@@ -481,9 +504,14 @@ export function periodForecast(
   const earnedShifts = summary.shifts.filter(
     (shift) => shiftStatus(shift, now) === "completed",
   );
-  const futureShifts = summary.shifts.filter(
-    (shift) => shiftStatus(shift, now) !== "completed",
-  );
+  const futureShifts = summary.shifts
+    .filter((shift) => shiftStatus(shift, now) !== "completed")
+    .sort(
+      (a, b) =>
+        a.date.localeCompare(b.date) ||
+        a.start.localeCompare(b.start) ||
+        a.id.localeCompare(b.id),
+    );
   const earnedWages = earnedShifts.reduce(
     (sum, shift) => sum + shiftAmount(shift, summary.shifts),
     0,

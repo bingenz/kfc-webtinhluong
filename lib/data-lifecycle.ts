@@ -29,6 +29,7 @@ export function hasUserData(ledger: Ledger) {
     ledger.payments.length > 0 ||
     ledger.settlements.length > 0 ||
     ledger.reconciliations.length > 0 ||
+    ledger.studySchedules.length > 0 ||
     ledger.holidays.length > 0 ||
     ledger.roles.some((role) => !["cook", "lobby", "cash"].includes(role.id)) ||
     ledger.rates.some((rate) => !["cook-initial", "lobby-initial"].includes(rate.id)) ||
@@ -61,7 +62,7 @@ function mergeByKey<T>(
 
 export function mergeLedgers(device: Ledger, cloud: Ledger): Ledger {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     roles: mergeByKey(cloud.roles, device.roles, (x) => x.id, "vị trí"),
     rates: mergeByKey(cloud.rates, device.rates, (x) => x.id, "mức lương"),
     rules: mergeByKey(cloud.rules, device.rules, (x) => x.id, "quy tắc"),
@@ -71,6 +72,7 @@ export function mergeLedgers(device: Ledger, cloud: Ledger): Ledger {
     payments: mergeByKey(cloud.payments, device.payments, (x) => x.id, "khoản nhận"),
     settlements: mergeByKey(cloud.settlements, device.settlements, (x) => x.month, "kỳ đã chốt"),
     reconciliations: mergeByKey(cloud.reconciliations, device.reconciliations, (x) => x.month, "đối soát"),
+    studySchedules: mergeByKey(cloud.studySchedules, device.studySchedules, (x) => x.id, "lịch học"),
   };
 }
 

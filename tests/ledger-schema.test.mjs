@@ -3,10 +3,19 @@ import assert from 'node:assert/strict';
 import {parseLedger} from '../lib/ledger-schema.ts';
 import {initialLedger,makeShift,shiftBonus,shiftAmount} from '../lib/payroll.ts';
 
-test('Sổ v1 hiện có giữ nguyên khi kiểm tra dữ liệu',()=>{
+test('Sổ v2 hiện có giữ nguyên khi kiểm tra dữ liệu',()=>{
   const d=initialLedger();
   d.shifts.push(makeShift(d,{date:'2026-09-09',roleId:'cook',start:'17:30',end:'22:00',note:''}));
   assert.deepEqual(parseLedger(JSON.parse(JSON.stringify(d))),d);
+});
+test('Sổ v1 được nâng cấp thêm lịch học rỗng mà giữ nguyên dữ liệu cũ',()=>{
+  const current=initialLedger();
+  current.shifts.push(makeShift(current,{date:'2026-09-09',roleId:'cook',start:'17:30',end:'22:00',note:'giữ nguyên'}));
+  const legacy={...current,schemaVersion:1};delete legacy.studySchedules;
+  const parsed=parseLedger(JSON.parse(JSON.stringify(legacy)));
+  assert.equal(parsed.schemaVersion,2);
+  assert.deepEqual(parsed.studySchedules,[]);
+  assert.deepEqual(parsed.shifts,legacy.shifts);
 });
 test('Sổ đã lưu trước khi có xác nhận đối soát vẫn đọc được',()=>{
   const legacy=initialLedger();delete legacy.reconciliations;

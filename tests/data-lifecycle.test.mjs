@@ -30,6 +30,16 @@ test('merge adds distinct local/cloud records and detects same-id conflict',()=>
   assert.throws(()=>mergeLedgers(device,conflict),/cùng mã.*nội dung khác/);
 });
 
+test('study schedules count as data and merge without touching shifts',()=>{
+  const device=initialLedger(), cloud=initialLedger();
+  device.studySchedules.push({id:'study-local',kind:'single',date:'2026-09-11',start:'08:00',end:'10:00'});
+  cloud.studySchedules.push({id:'study-cloud',kind:'weekly',startDate:'2026-09-01',endDate:'2026-09-30',weekdays:[2],start:'13:00',end:'15:00',exceptions:[]});
+  assert.equal(hasUserData(device),true);
+  const merged=mergeLedgers(device,cloud);
+  assert.deepEqual(merged.studySchedules.map(x=>x.id).sort(),['study-cloud','study-local']);
+  assert.deepEqual(merged.shifts,[]);
+});
+
 test('backup keys are namespaced and timestamp-safe',()=>{
   assert.equal(backupKey('2026-09-16T12:34:56.000Z'),'ca-lam-backup-v1:2026-09-16T12-34-56.000Z');
 });

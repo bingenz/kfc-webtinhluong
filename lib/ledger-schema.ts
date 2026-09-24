@@ -6,8 +6,15 @@ const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 const amount = z.number().finite().min(0).max(1_000_000_000);
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 const roundMode = z.enum(['nearest','down','up']);
-const ledgerSchema = z.object({
- schemaVersion: z.literal(1),
+const studyException = z.discriminatedUnion('action',[
+ z.object({date,action:z.literal('cancel')}),
+ z.object({date,action:z.literal('replace'),start:time,end:time}),
+]);
+const studySchedule = z.discriminatedUnion('kind',[
+ z.object({id,kind:z.literal('single'),date,start:time,end:time}),
+ z.object({id,kind:z.literal('weekly'),startDate:date,endDate:date,weekdays:z.array(z.number().int().min(0).max(6)).min(1).max(7),start:time,end:time,exceptions:z.array(studyException)}),
+]);
+const ledgerFields = {
  roles: z.array(z.object({id,name:z.string().min(1).max(80),color,active:z.boolean()})),
  rates: z.array(z.object({id,roleId:id,from:date,amount})),
  rules: z.array(z.object({id,from:date,closingRole:id,closingTime:time,closingAmount:amount,holidayBonus:z.boolean(),cutoff:z.number().int().min(0).max(31),payday:z.number().int().min(1).max(31),rounding:z.number().positive().max(1_000_000),roundMode})).min(1),
@@ -17,9 +24,13 @@ const ledgerSchema = z.object({
  payments:z.array(z.object({id,month:z.string().regex(/^\d{4}-\d{2}$/),date,amount,note:z.string().max(300)})),
  settlements:z.array(z.object({month:z.string().regex(/^\d{4}-\d{2}$/),start:date,end:date,expected:z.number().finite(),payDate:date,lockedAt:z.string()})),
  reconciliations:z.array(z.object({month:z.string().regex(/^\d{4}-\d{2}$/),expected:z.number().finite(),received:z.number().finite(),difference:z.number().finite(),note:z.string().max(300),confirmedAt:z.string().min(1).max(100)})).default([]),
-});
+};
+const ledgerSchema = z.object({schemaVersion:z.literal(2),...ledgerFields,studySchedules:z.array(studySchedule)});
+const legacyLedgerSchema = z.object({schemaVersion:z.literal(1),...ledgerFields});
 export function parseLedger(value:unknown):Ledger {
- const parsed=ledgerSchema.safeParse(value);
- if(!parsed.success)throw new Error('Không đọc được sổ lương vì dữ liệu không hợp lệ. Dữ liệu gốc vẫn được giữ nguyên.');
- return parsed.data;
+ const current=ledgerSchema.safeParse(value);
+ if(current.success)return current.data;
+ const legacy=legacyLedgerSchema.safeParse(value);
+ if(legacy.success)return {...legacy.data,schemaVersion:2,studySchedules:[]};
+ throw new Error('Không đọc được sổ lương vì dữ liệu không hợp lệ. Dữ liệu gốc vẫn được giữ nguyên.');
 }
